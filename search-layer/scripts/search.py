@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Multi-source search: Exa + Tavily with mode selection and dedup.
+Multi-source search v2: Exa + Tavily with intent-aware scoring and ranking.
 Brave is handled by the agent via built-in web_search (cannot be called from script).
 
 Modes:
@@ -8,26 +8,230 @@ Modes:
   deep   - Exa + Tavily parallel (max coverage)
   answer - Tavily search (includes AI-generated answer with citations)
 
+Intent types (affect scoring weights):
+  factual, status, comparison, tutorial, exploratory, news, resource
+
 Usage:
   python3 search.py "query" --mode deep --num 5
-  python3 search.py "query" --mode answer
+  python3 search.py "query" --mode deep --intent status --freshness pw
+  python3 search.py --queries "q1" "q2" --mode deep --intent comparison
+  python3 search.py "query" --domain-boost github.com,stackoverflow.com
 """
 
 import json
 import sys
-import argparse
 import os
+import re
+import argparse
 import concurrent.futures
+from datetime import datetime, timezone, timedelta
 from urllib.parse import urlparse, urlencode, parse_qs, urlunparse
+from pathlib import Path
 
 try:
     import requests
 except ImportError:
-    import subprocess
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "requests", "-q"])
-    import requests
+    print('{"error": "requests library not installed. Run: pip install requests"}',
+          file=sys.stderr)
+    sys.exit(1)
 
 
+# ---------------------------------------------------------------------------
+# Intent weight profiles: {keyword_match, freshness, authority}
+# ---------------------------------------------------------------------------
+INTENT_WEIGHTS = {
+    "factual":     {"keyword": 0.4, "freshness": 0.1, "authority": 0.5},
+    "status":      {"keyword": 0.3, "freshness": 0.5, "authority": 0.2},
+    "comparison":  {"keyword": 0.4, "freshness": 0.2, "authority": 0.4},
+    "tutorial":    {"keyword": 0.4, "freshness": 0.1, "authority": 0.5},
+    "exploratory": {"keyword": 0.3, "freshness": 0.2, "authority": 0.5},
+    "news":        {"keyword": 0.3, "freshness": 0.6, "authority": 0.1},
+    "resource":    {"keyword": 0.5, "freshness": 0.1, "authority": 0.4},
+}
+
+# ---------------------------------------------------------------------------
+# Authority domains (loaded from JSON, with fallback built-in)
+# ---------------------------------------------------------------------------
+_AUTHORITY_CACHE = None
+
+def _load_authority_data():
+    global _AUTHORITY_CACHE
+    if _AUTHORITY_CACHE is not None:
+        return _AUTHORITY_CACHE
+
+    # Try loading from references file
+    ref_path = Path(__file__).parent.parent / "references" / "authority-domains.json"
+    domain_scores = {}
+    pattern_rules = []
+
+    if ref_path.exists():
+        try:
+            data = json.loads(ref_path.read_text())
+            for tier_key in ("tier1", "tier2", "tier3"):
+                tier = data.get(tier_key, {})
+                score = tier.get("score", 0.4)
+                for d in tier.get("domains", []):
+                    domain_scores[d] = score
+            pattern_rules = data.get("pattern_rules", [])
+            default_score = data.get("tier4_default_score", 0.4)
+        except Exception:
+            default_score = 0.4
+    else:
+        # Fallback built-in
+        domain_scores = {
+            "github.com": 1.0, "stackoverflow.com": 1.0, "wikipedia.org": 1.0,
+            "developer.mozilla.org": 1.0, "arxiv.org": 1.0,
+            "news.ycombinator.com": 0.8, "dev.to": 0.8, "reddit.com": 0.8,
+            "medium.com": 0.6, "hackernoon.com": 0.6,
+        }
+        default_score = 0.4
+
+    _AUTHORITY_CACHE = (domain_scores, pattern_rules, default_score)
+    return _AUTHORITY_CACHE
+
+
+def get_authority_score(url: str) -> float:
+    """Return authority score (0.0-1.0) for a URL based on its domain."""
+    domain_scores, pattern_rules, default_score = _load_authority_data()
+
+    try:
+        hostname = urlparse(url).hostname or ""
+    except Exception:
+        return default_score
+
+    # Exact match (with and without www.)
+    for candidate in (hostname, hostname.removeprefix("www.")):
+        if candidate in domain_scores:
+            return domain_scores[candidate]
+        # Check if any known domain is a suffix (e.g., "blog.github.com" matches "github.com")
+        for known, score in domain_scores.items():
+            if candidate.endswith("." + known) or candidate == known:
+                return score
+
+    # Pattern rules
+    for rule in pattern_rules:
+        pat = rule.get("pattern", "")
+        score = rule.get("score", default_score)
+        if pat.startswith("*."):
+            # Suffix match: *.github.io
+            suffix = pat[1:]  # .github.io
+            if hostname.endswith(suffix):
+                return score
+        elif pat.endswith(".*"):
+            # Prefix match: docs.*
+            prefix = pat[:-2]  # docs
+            if hostname.startswith(prefix + "."):
+                return score
+        elif pat.startswith("*.") and pat.endswith(".*"):
+            # Contains match
+            middle = pat[2:-2]
+            if middle in hostname:
+                return score
+
+    return default_score
+
+
+# ---------------------------------------------------------------------------
+# Freshness scoring
+# ---------------------------------------------------------------------------
+def get_freshness_score(result: dict) -> float:
+    """
+    Score freshness 0.0-1.0 based on published date if available.
+    Falls back to 0.5 (neutral) if no date info.
+    """
+    date_str = result.get("published_date") or result.get("date") or ""
+    if not date_str:
+        # Try to extract year from snippet
+        snippet = result.get("snippet", "")
+        year_match = re.search(r'\b(202[0-9])\b', snippet)
+        if year_match:
+            year = int(year_match.group(1))
+            now_year = datetime.now(timezone.utc).year
+            diff = now_year - year
+            if diff == 0:
+                return 0.9
+            elif diff == 1:
+                return 0.6
+            elif diff <= 3:
+                return 0.4
+            else:
+                return 0.2
+        return 0.5  # Unknown → neutral
+
+    # Try parsing common date formats
+    now = datetime.now(timezone.utc)
+    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d", "%B %d, %Y", "%b %d, %Y",
+                "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S%z"):
+        try:
+            dt = datetime.strptime(date_str.strip(), fmt)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            days_old = (now - dt).days
+            if days_old <= 1:
+                return 1.0
+            elif days_old <= 7:
+                return 0.9
+            elif days_old <= 30:
+                return 0.7
+            elif days_old <= 90:
+                return 0.5
+            elif days_old <= 365:
+                return 0.3
+            else:
+                return 0.1
+        except (ValueError, TypeError):
+            continue
+
+    return 0.5
+
+
+# ---------------------------------------------------------------------------
+# Keyword match scoring
+# ---------------------------------------------------------------------------
+def get_keyword_score(result: dict, query: str) -> float:
+    """Simple keyword overlap score between query terms and result title+snippet."""
+    query_terms = set(query.lower().split())
+    # Remove very short terms (articles, prepositions)
+    query_terms = {t for t in query_terms if len(t) > 2}
+    if not query_terms:
+        return 0.5
+
+    text = (result.get("title", "") + " " + result.get("snippet", "")).lower()
+    matches = sum(1 for t in query_terms if t in text)
+    return min(1.0, matches / len(query_terms))
+
+
+# ---------------------------------------------------------------------------
+# Composite scoring
+# ---------------------------------------------------------------------------
+def score_result(result: dict, query: str, intent: str, boost_domains: set) -> float:
+    """Compute composite score for a result based on intent weights."""
+    weights = INTENT_WEIGHTS.get(intent, INTENT_WEIGHTS["exploratory"])
+
+    kw = get_keyword_score(result, query)
+    fr = get_freshness_score(result)
+    au = get_authority_score(result.get("url", ""))
+
+    # Domain boost: +0.2 if domain matches boost list
+    if boost_domains:
+        try:
+            hostname = urlparse(result.get("url", "")).hostname or ""
+            for bd in boost_domains:
+                if hostname == bd or hostname.endswith("." + bd):
+                    au = min(1.0, au + 0.2)
+                    break
+        except Exception:
+            pass
+
+    score = (weights["keyword"] * kw +
+             weights["freshness"] * fr +
+             weights["authority"] * au)
+    return round(score, 4)
+
+
+# ---------------------------------------------------------------------------
+# API key loading
+# ---------------------------------------------------------------------------
 def _find_tools_md() -> str | None:
     """Walk up from CWD / known locations to find TOOLS.md."""
     candidates = [
@@ -47,11 +251,18 @@ def get_keys():
         try:
             with open(tools_md) as f:
                 for line in f:
-                    if "**Exa**:" in line:
-                        keys["exa"] = line.split("`")[1]
-                    elif "**Tavily**:" in line:
-                        keys["tavily"] = line.split("`")[1]
-        except (FileNotFoundError, IndexError):
+                    try:
+                        if "**Exa**:" in line and "`" in line:
+                            parts = line.split("`")
+                            if len(parts) >= 2:
+                                keys["exa"] = parts[1]
+                        elif "**Tavily**:" in line and "`" in line:
+                            parts = line.split("`")
+                            if len(parts) >= 2:
+                                keys["tavily"] = parts[1]
+                    except (IndexError, ValueError):
+                        continue
+        except FileNotFoundError:
             pass
     # Env vars override file
     if v := os.environ.get("EXA_API_KEY"):
@@ -61,6 +272,9 @@ def get_keys():
     return keys
 
 
+# ---------------------------------------------------------------------------
+# URL normalization & dedup
+# ---------------------------------------------------------------------------
 def normalize_url(url: str) -> str:
     """Canonical URL for dedup: strip utm_*, anchors, trailing slash."""
     try:
@@ -73,6 +287,9 @@ def normalize_url(url: str) -> str:
         return url.rstrip("/")
 
 
+# ---------------------------------------------------------------------------
+# Search source functions
+# ---------------------------------------------------------------------------
 def search_exa(query: str, key: str, num: int = 5) -> list:
     try:
         r = requests.post(
@@ -82,21 +299,27 @@ def search_exa(query: str, key: str, num: int = 5) -> list:
             timeout=20,
         )
         r.raise_for_status()
-        return [
-            {
+        results = []
+        for res in r.json().get("results", []):
+            url = res.get("url")
+            if not url:
+                continue
+            results.append({
                 "title": res.get("title", ""),
-                "url": res["url"],
+                "url": url,
                 "snippet": res.get("text", res.get("snippet", "")),
+                "published_date": res.get("publishedDate", ""),
                 "source": "exa",
-            }
-            for res in r.json().get("results", [])
-        ]
+            })
+        return results
     except Exception as e:
         print(f"[exa] error: {e}", file=sys.stderr)
         return []
 
 
-def search_tavily(query: str, key: str, num: int = 5, include_answer: bool = False) -> dict:
+def search_tavily(query: str, key: str, num: int = 5,
+                   include_answer: bool = False,
+                   freshness: str = None) -> dict:
     """Returns {"results": [...], "answer": str|None}."""
     try:
         payload = {
@@ -104,6 +327,11 @@ def search_tavily(query: str, key: str, num: int = 5, include_answer: bool = Fal
             "max_results": num,
             "include_answer": include_answer,
         }
+        # Tavily supports time-based filtering via topic + days
+        if freshness:
+            days_map = {"pd": 1, "pw": 7, "pm": 30, "py": 365}
+            if freshness in days_map:
+                payload["days"] = days_map[freshness]
         r = requests.post(
             "https://api.tavily.com/search",
             headers={"Content-Type": "application/json"},
@@ -112,21 +340,27 @@ def search_tavily(query: str, key: str, num: int = 5, include_answer: bool = Fal
         )
         r.raise_for_status()
         data = r.json()
-        results = [
-            {
+        results = []
+        for res in data.get("results", []):
+            url = res.get("url")
+            if not url:
+                continue
+            results.append({
                 "title": res.get("title", ""),
-                "url": res["url"],
+                "url": url,
                 "snippet": res.get("content", ""),
+                "published_date": res.get("published_date", ""),
                 "source": "tavily",
-            }
-            for res in data.get("results", [])
-        ]
+            })
         return {"results": results, "answer": data.get("answer")}
     except Exception as e:
         print(f"[tavily] error: {e}", file=sys.stderr)
         return {"results": [], "answer": None}
 
 
+# ---------------------------------------------------------------------------
+# Dedup
+# ---------------------------------------------------------------------------
 def dedup(results: list) -> list:
     seen = {}
     out = []
@@ -143,31 +377,32 @@ def dedup(results: list) -> list:
     return out
 
 
-def main():
-    ap = argparse.ArgumentParser(description="Multi-source search (Exa + Tavily)")
-    ap.add_argument("query", help="Search query")
-    ap.add_argument("--mode", choices=["fast", "deep", "answer"], default="deep",
-                    help="fast=Exa only | deep=Exa+Tavily | answer=Tavily with AI answer")
-    ap.add_argument("--num", type=int, default=5, help="Results per source (default 5)")
-    args = ap.parse_args()
-
-    keys = get_keys()
+# ---------------------------------------------------------------------------
+# Single-query search execution
+# ---------------------------------------------------------------------------
+def execute_search(query: str, mode: str, keys: dict, num: int,
+                   include_answer: bool = False,
+                   freshness: str = None) -> tuple:
+    """Execute search for a single query. Returns (results_list, answer_text)."""
     all_results = []
     answer_text = None
 
-    if args.mode == "fast":
-        if "exa" not in keys:
-            print('{"error": "Exa API key not found. Set EXA_API_KEY env or add to TOOLS.md"}')
-            sys.exit(1)
-        all_results = search_exa(args.query, keys["exa"], args.num)
+    if mode == "fast":
+        if "exa" in keys:
+            all_results = search_exa(query, keys["exa"], num)
+        else:
+            print('{"warning": "Exa API key not found, no results for fast mode"}',
+                  file=sys.stderr)
 
-    elif args.mode == "deep":
+    elif mode == "deep":
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
             futures = {}
             if "exa" in keys:
-                futures["exa"] = pool.submit(search_exa, args.query, keys["exa"], args.num)
+                futures["exa"] = pool.submit(search_exa, query, keys["exa"], num)
             if "tavily" in keys:
-                futures["tavily"] = pool.submit(search_tavily, args.query, keys["tavily"], args.num)
+                futures["tavily"] = pool.submit(
+                    search_tavily, query, keys["tavily"], num,
+                    freshness=freshness)
             for name, fut in futures.items():
                 res = fut.result()
                 if isinstance(res, dict):
@@ -175,19 +410,102 @@ def main():
                 else:
                     all_results.extend(res)
 
-    elif args.mode == "answer":
+    elif mode == "answer":
         if "tavily" not in keys:
-            print('{"error": "Tavily API key not found. Set TAVILY_API_KEY env or add to TOOLS.md"}')
-            sys.exit(1)
-        tav = search_tavily(args.query, keys["tavily"], args.num, include_answer=True)
-        all_results = tav["results"]
-        answer_text = tav.get("answer")
+            print('{"warning": "Tavily API key not found"}', file=sys.stderr)
+        else:
+            tav = search_tavily(query, keys["tavily"], num,
+                                include_answer=True, freshness=freshness)
+            all_results = tav["results"]
+            answer_text = tav.get("answer")
 
+    return all_results, answer_text
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+def main():
+    ap = argparse.ArgumentParser(
+        description="Multi-source search v2 (Exa + Tavily) with intent-aware scoring")
+    ap.add_argument("query", nargs="?", default=None, help="Search query (single)")
+    ap.add_argument("--queries", nargs="+", default=None,
+                    help="Multiple queries to execute in parallel")
+    ap.add_argument("--mode", choices=["fast", "deep", "answer"], default="deep",
+                    help="fast=Exa only | deep=Exa+Tavily | answer=Tavily with AI answer")
+    ap.add_argument("--num", type=int, default=5,
+                    help="Results per source per query (default 5)")
+    ap.add_argument("--intent",
+                    choices=["factual", "status", "comparison", "tutorial",
+                             "exploratory", "news", "resource"],
+                    default=None,
+                    help="Query intent type for scoring (default: no intent scoring)")
+    ap.add_argument("--freshness", choices=["pd", "pw", "pm", "py"], default=None,
+                    help="Freshness filter (pd=24h, pw=week, pm=month, py=year)")
+    ap.add_argument("--domain-boost", default=None,
+                    help="Comma-separated domains to boost in scoring")
+    args = ap.parse_args()
+
+    # Determine queries
+    queries = []
+    if args.queries:
+        queries = args.queries
+    elif args.query:
+        queries = [args.query]
+    else:
+        ap.error("Provide a query positional argument or --queries")
+
+    keys = get_keys()
+    boost_domains = set()
+    if args.domain_boost:
+        boost_domains = {d.strip() for d in args.domain_boost.split(",")}
+
+    # Execute all queries (parallel if multiple)
+    all_results = []
+    answer_text = None
+
+    if len(queries) == 1:
+        results, answer_text = execute_search(
+            queries[0], args.mode, keys, args.num,
+            include_answer=(args.mode == "answer"),
+            freshness=args.freshness)
+        all_results = results
+    else:
+        max_workers = min(len(queries), 8)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = {
+                pool.submit(execute_search, q, args.mode, keys, args.num,
+                            freshness=args.freshness): q
+                for q in queries
+            }
+            for fut in concurrent.futures.as_completed(futures):
+                results, ans = fut.result()
+                all_results.extend(results)
+                if ans and not answer_text:
+                    answer_text = ans
+
+    # Dedup
     deduped = dedup(all_results)
 
-    output = {"mode": args.mode, "count": len(deduped), "results": deduped}
+    # Score and sort if intent is specified
+    if args.intent:
+        primary_query = queries[0]  # Use first query for keyword scoring
+        for r in deduped:
+            r["score"] = score_result(r, primary_query, args.intent, boost_domains)
+        deduped.sort(key=lambda x: x.get("score", 0), reverse=True)
+
+    # Build output
+    output = {
+        "mode": args.mode,
+        "intent": args.intent,
+        "queries": queries,
+        "count": len(deduped),
+        "results": deduped,
+    }
     if answer_text:
         output["answer"] = answer_text
+    if args.freshness:
+        output["freshness_filter"] = args.freshness
 
     print(json.dumps(output, ensure_ascii=False, indent=2))
 
