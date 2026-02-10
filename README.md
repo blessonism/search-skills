@@ -1,10 +1,4 @@
-# ⚠️ This repository has been merged into [openclaw-skills](https://github.com/blessonism/openclaw-skills)
-
-本仓库的所有内容（search-layer、content-extract、mineru-extract）已合并到统一仓库：
-
-👉 **https://github.com/blessonism/openclaw-skills**
-
-请前往新仓库获取最新版本。本仓库不再更新。
+> 📦 本仓库已收录至 [openclaw-skills](https://github.com/blessonism/openclaw-skills)（聚合仓库，包含更多 Skills）。推荐 Star 聚合仓库以获取全部更新。
 
 ---
 
