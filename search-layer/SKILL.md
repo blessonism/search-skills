@@ -2,15 +2,15 @@
 name: search-layer
 description: >
   Multi-source search and deduplication layer with intent-aware scoring.
-  Integrates Brave Search (web_search), Exa, and Tavily to provide high-coverage,
-  high-quality results. Automatically classifies query intent and adjusts search
-  strategy, scoring weights, and result synthesis accordingly.
+  Integrates Brave Search (web_search), Exa, Tavily, and Grok to provide
+  high-coverage, high-quality results. Automatically classifies query intent
+  and adjusts search strategy, scoring weights, and result synthesis accordingly.
   Triggers on "deep search", "multi-source search", or when high-quality research is needed.
 ---
 
-# Search Layer v2 — 意图感知多源检索协议
+# Search Layer v2.1 — 意图感知多源检索协议
 
-三源同级：Brave (`web_search`) + Exa + Tavily。按意图自动选策略、调权重、做合成。
+四源同级：Brave (`web_search`) + Exa + Tavily + Grok。按意图自动选策略、调权重、做合成。
 
 ## 执行流程
 
@@ -21,7 +21,7 @@ description: >
     ↓
 [Phase 2] 查询分解 & 扩展 → 生成子查询
     ↓
-[Phase 3] 多源并行检索 → Brave + search.py
+[Phase 3] 多源并行检索 → Brave + search.py (Exa + Tavily + Grok)
     ↓
 [Phase 4] 结果合并 & 排序 → 去重 + 意图加权评分
     ↓
@@ -85,7 +85,7 @@ description: >
 web_search(query="Deno 2.0 latest 2026", freshness="pw")
 ```
 
-### Step 2: Exa + Tavily（Deep / Answer 模式）
+### Step 2: Exa + Tavily + Grok（Deep / Answer 模式）
 
 对子查询调用 search.py，传入意图和 freshness：
 
@@ -98,6 +98,13 @@ python3 /home/node/.openclaw/workspace/skills/search-layer/scripts/search.py \
   --num 5
 ```
 
+**各模式源参与矩阵**：
+| 模式 | Exa | Tavily | Grok | 说明 |
+|------|-----|--------|------|------|
+| fast | ✅ | ❌ | fallback | Exa 优先；无 Exa key 时用 Grok |
+| deep | ✅ | ✅ | ✅ | 三源并行 |
+| answer | ❌ | ✅ | ❌ | 仅 Tavily（含 AI answer） |
+
 **参数说明**：
 | 参数 | 说明 |
 |------|------|
@@ -107,6 +114,13 @@ python3 /home/node/.openclaw/workspace/skills/search-layer/scripts/search.py \
 | `--freshness` | pd(24h) / pw(周) / pm(月) / py(年) |
 | `--domain-boost` | 逗号分隔的域名，匹配的结果权威分 +0.2 |
 | `--num` | 每源每查询的结果数 |
+
+**Grok 源说明**：
+- 通过 completions API 调用 Grok 模型（`grok-4.1`），利用其实时知识返回结构化搜索结果
+- 自动检测时间敏感查询并注入当前时间上下文
+- 在 deep 模式下与 Exa、Tavily 并行执行
+- 需要在 TOOLS.md 中配置 `Grok API URL`、`Grok API Key`、`Grok Model`
+- 如果 Grok 配置缺失，自动降级为 Exa + Tavily 双源
 
 ### Step 3: 合并
 
@@ -138,9 +152,14 @@ score = w_keyword × keyword_match + w_freshness × freshness_score + w_authorit
 
 ### Domain Boost
 
-对特定意图，自动 boost 相关域名：
+通过 `--domain-boost` 参数手动指定需要加权的域名（匹配的结果权威分 +0.2）：
+```bash
+search.py "query" --mode deep --intent tutorial --domain-boost dev.to,freecodecamp.org
+```
+
+推荐搭配：
 - Tutorial → `dev.to, freecodecamp.org, realpython.com, baeldung.com`
-- Resource → `github.com, docs.*`
+- Resource → `github.com`
 - News → `techcrunch.com, arstechnica.com, theverge.com`
 
 ---
@@ -192,8 +211,9 @@ score = w_keyword × keyword_match + w_freshness × freshness_score + w_authorit
 
 ## 降级策略
 
-- Exa 429/5xx → 继续 Brave + Tavily
-- Tavily 429/5xx → 继续 Brave + Exa
+- Exa 429/5xx → 继续 Brave + Tavily + Grok
+- Tavily 429/5xx → 继续 Brave + Exa + Grok
+- Grok 超时/错误 → 继续 Brave + Exa + Tavily
 - search.py 整体失败 → 仅用 Brave `web_search`（始终可用）
 - **永远不要因为某个源失败而阻塞主流程**
 
