@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Multi-source search v2.1: Exa + Tavily + Grok with intent-aware scoring and ranking.
+Multi-source search v2.2: Exa + Tavily + Grok with intent-aware scoring and ranking.
 Brave is handled by the agent via built-in web_search (cannot be called from script).
 
 Sources:
@@ -32,6 +32,22 @@ import concurrent.futures
 from datetime import datetime, timezone, timedelta
 from urllib.parse import urlparse, urlencode, parse_qs, urlunparse
 from pathlib import Path
+import threading
+
+# Global concurrency limiter: cap total HTTP threads across nested pools.
+# Multi-query deep mode spawns outer_workers × 3 inner threads; this semaphore
+# ensures the total never exceeds 8 regardless of nesting.
+_THREAD_SEMAPHORE = threading.Semaphore(8)
+
+
+def _throttled(fn):
+    """Decorator: acquire global semaphore around a search-source call."""
+    def wrapper(*args, **kwargs):
+        with _THREAD_SEMAPHORE:
+            return fn(*args, **kwargs)
+    wrapper.__name__ = fn.__name__
+    return wrapper
+
 
 try:
     import requests
@@ -253,32 +269,21 @@ def get_keys():
     keys = {}
     tools_md = _find_tools_md()
     if tools_md:
+        # Regex patterns: match **Label**: `value` with flexible whitespace
+        _KEY_PATTERNS = {
+            "exa":        re.compile(r'\*\*Exa\*\*:\s*`([^`]+)`'),
+            "tavily":     re.compile(r'\*\*Tavily\*\*:\s*`([^`]+)`'),
+            "grok_key":   re.compile(r'\*\*Grok API Key\*\*:\s*`([^`]+)`'),
+            "grok_url":   re.compile(r'\*\*Grok API URL\*\*:\s*`([^`]+)`'),
+            "grok_model": re.compile(r'\*\*Grok Model\*\*:\s*`([^`]+)`'),
+        }
         try:
             with open(tools_md) as f:
-                for line in f:
-                    try:
-                        if "**Exa**:" in line and "`" in line:
-                            parts = line.split("`")
-                            if len(parts) >= 2:
-                                keys["exa"] = parts[1]
-                        elif "**Tavily**:" in line and "`" in line:
-                            parts = line.split("`")
-                            if len(parts) >= 2:
-                                keys["tavily"] = parts[1]
-                        elif "**Grok API Key**:" in line and "`" in line:
-                            parts = line.split("`")
-                            if len(parts) >= 2:
-                                keys["grok_key"] = parts[1]
-                        elif "**Grok API URL**:" in line and "`" in line:
-                            parts = line.split("`")
-                            if len(parts) >= 2:
-                                keys["grok_url"] = parts[1]
-                        elif "**Grok Model**:" in line and "`" in line:
-                            parts = line.split("`")
-                            if len(parts) >= 2:
-                                keys["grok_model"] = parts[1]
-                    except (IndexError, ValueError):
-                        continue
+                text = f.read()
+            for key_name, pattern in _KEY_PATTERNS.items():
+                m = pattern.search(text)
+                if m:
+                    keys[key_name] = m.group(1)
         except FileNotFoundError:
             pass
     # Env vars override file
@@ -313,6 +318,7 @@ def normalize_url(url: str) -> str:
 # ---------------------------------------------------------------------------
 # Search source functions
 # ---------------------------------------------------------------------------
+@_throttled
 def search_grok(query: str, api_url: str, api_key: str, model: str = "grok-4.1",
                 num: int = 5, freshness: str = None) -> list:
     """Use Grok model via completions API as a search source.
@@ -453,6 +459,7 @@ def search_grok(query: str, api_url: str, api_key: str, model: str = "grok-4.1",
         return []
 
 
+@_throttled
 def search_exa(query: str, key: str, num: int = 5) -> list:
     try:
         r = requests.post(
@@ -480,6 +487,7 @@ def search_exa(query: str, key: str, num: int = 5) -> list:
         return []
 
 
+@_throttled
 def search_tavily(query: str, key: str, num: int = 5,
                    include_answer: bool = False,
                    freshness: str = None) -> dict:
@@ -569,16 +577,21 @@ def execute_search(query: str, mode: str, keys: dict, num: int,
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
             futures = {}
             if "exa" in keys:
-                futures["exa"] = pool.submit(search_exa, query, keys["exa"], num)
+                futures[pool.submit(search_exa, query, keys["exa"], num)] = "exa"
             if "tavily" in keys:
-                futures["tavily"] = pool.submit(
+                futures[pool.submit(
                     search_tavily, query, keys["tavily"], num,
-                    freshness=freshness)
+                    freshness=freshness)] = "tavily"
             if has_grok:
-                futures["grok"] = pool.submit(
-                    search_grok, query, grok_url, grok_key, grok_model, num, freshness)
-            for name, fut in futures.items():
-                res = fut.result()
+                futures[pool.submit(
+                    search_grok, query, grok_url, grok_key, grok_model, num, freshness)] = "grok"
+            for fut in concurrent.futures.as_completed(futures):
+                name = futures[fut]
+                try:
+                    res = fut.result()
+                except Exception as e:
+                    print(f"[{name}] error: {e}", file=sys.stderr)
+                    continue
                 if isinstance(res, dict):
                     all_results.extend(res.get("results", []))
                 else:
@@ -645,7 +658,9 @@ def main():
             freshness=args.freshness)
         all_results = results
     else:
-        max_workers = min(len(queries), 8)
+        # Cap outer concurrency: each query may spawn up to 3 inner threads (deep mode),
+        # so limit outer workers to avoid thread explosion (outer × inner ≤ semaphore cap)
+        max_workers = min(len(queries), 3)
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
             futures = {
                 pool.submit(execute_search, q, args.mode, keys, args.num,

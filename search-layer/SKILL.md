@@ -8,7 +8,7 @@ description: >
   Triggers on "deep search", "multi-source search", or when high-quality research is needed.
 ---
 
-# Search Layer v2.1 — 意图感知多源检索协议
+# Search Layer v2.2 — 意图感知多源检索协议
 
 四源同级：Brave (`web_search`) + Exa + Tavily + Grok。按意图自动选策略、调权重、做合成。
 
