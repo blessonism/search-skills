@@ -119,7 +119,7 @@ python3 /home/node/.openclaw/workspace/skills/search-layer/scripts/search.py \
 - 通过 completions API 调用 Grok 模型（`grok-4.1-fast`），利用其实时知识返回结构化搜索结果
 - 自动检测时间敏感查询并注入当前时间上下文
 - 在 deep 模式下与 Exa、Tavily 并行执行
-- 需要在 TOOLS.md 中配置 `Grok API URL`、`Grok API Key`、`Grok Model`
+- 需要在 `~/.openclaw/credentials/search.json` 中配置 Grok 的 `apiUrl`、`apiKey`、`model`（或通过环境变量 `GROK_API_URL`、`GROK_API_KEY`、`GROK_MODEL`）
 - 如果 Grok 配置缺失，自动降级为 Exa + Tavily 双源
 
 ### Step 3: 合并

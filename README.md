@@ -34,7 +34,7 @@ v2.2 增强了 Grok 源的稳定性，新增源过滤功能：
 - **默认模型升级**：Grok 默认模型从 `grok-4.1` 切换到 `grok-4.1-fast`（更快更稳定）
 - **Thinking 标签处理**：自动剥离 Grok thinking 模型的 `<think>` 标签
 - **JSON 提取增强**：处理 Grok 在 JSON 前输出自然语言文字的情况（`raw_decode` + `rfind` fallback）
-- **Table 格式配置**：支持从 TOOLS.md 表格格式加载 Grok 凭据（除原有的 `**bold**` 格式外）
+- **Credentials 文件**：统一凭据管理，`~/.openclaw/credentials/search.json` 集中存放所有搜索源 key
 
 ## search-layer v2.1 特性
 
@@ -89,38 +89,37 @@ ln -s ~/.openclaw/workspace/_repos/openclaw-search-skills/mineru-extract mineru-
 
 ### 搜索 API Keys（search-layer 需要）
 
-**环境变量：**
+**方式一：Credentials 文件（推荐）**
 
-```bash
-export BRAVE_API_KEY="your-brave-key"    # https://brave.com/search/api/ （OpenClaw 内置 web_search 使用）
-export EXA_API_KEY="your-exa-key"        # https://exa.ai
-export TAVILY_API_KEY="your-tavily-key"  # https://tavily.com
-export GROK_API_URL="https://api.x.ai/v1"  # xAI API（或兼容的代理站）
-export GROK_API_KEY="your-grok-key"      # https://console.x.ai
-export GROK_MODEL="grok-4.1-fast"        # 可选，默认 grok-4.1-fast
-```
+创建 `~/.openclaw/credentials/search.json`：
 
-**或写到 TOOLS.md（OpenClaw workspace 根目录）：**
-
-方式一（表格格式）：
-
-```markdown
-| Search (Grok) | API URL: `https://api.x.ai/v1`, Model: `grok-4.1-fast` | Key: `your-grok-key` |
-```
-
-方式二（列表格式）：
-
-```markdown
-### Search
-- **Brave**: `your-brave-key`
-- **Exa**: `your-exa-key`
-- **Tavily**: `your-tavily-key`
-- **Grok API URL**: `https://api.x.ai/v1`
-- **Grok API Key**: `your-grok-key`
-- **Grok Model**: `grok-4.1-fast`
+```json
+{
+  "exa": "your-exa-key",
+  "tavily": "your-tavily-key",
+  "grok": {
+    "apiUrl": "https://api.x.ai/v1",
+    "apiKey": "your-grok-key",
+    "model": "grok-4.1-fast"
+  }
+}
 ```
 
 > 💡 Grok 配置可选。缺失时自动降级为 Exa + Tavily 双源。
+
+**方式二：环境变量（兼容）**
+
+```bash
+export EXA_API_KEY="your-exa-key"        # https://exa.ai
+export TAVILY_API_KEY="your-tavily-key"  # https://tavily.com
+export GROK_API_URL="https://api.x.ai/v1"  # 可选
+export GROK_API_KEY="your-grok-key"      # 可选
+export GROK_MODEL="grok-4.1-fast"        # 可选，默认 grok-4.1-fast
+```
+
+环境变量会覆盖 credentials 文件中的同名配置。
+
+Brave API Key 由 OpenClaw 内置的 `web_search` 工具管理，不需要在这里配置。
 
 ### MinerU Token（可选，content-extract 需要）
 

@@ -253,11 +253,11 @@ def score_result(result: dict, query: str, intent: str, boost_domains: set) -> f
 # ---------------------------------------------------------------------------
 # API key loading
 # ---------------------------------------------------------------------------
-def _find_tools_md() -> str | None:
-    """Walk up from CWD / known locations to find TOOLS.md."""
+def _find_credentials() -> str | None:
+    """Find search.json credentials file."""
     candidates = [
-        os.path.join(os.getcwd(), "TOOLS.md"),
-        os.path.expanduser("~/.openclaw/workspace/TOOLS.md"),
+        os.path.expanduser("~/.openclaw/credentials/search.json"),
+        os.path.join(os.getcwd(), "credentials/search.json"),
     ]
     for c in candidates:
         if os.path.isfile(c):
@@ -267,39 +267,24 @@ def _find_tools_md() -> str | None:
 
 def get_keys():
     keys = {}
-    tools_md = _find_tools_md()
-    if tools_md:
-        # Regex patterns: match **Label**: `value` or table format with flexible whitespace
-        _KEY_PATTERNS = {
-            "exa":        re.compile(r'\*\*Exa\*\*:\s*`([^`]+)`'),
-            "tavily":     re.compile(r'\*\*Tavily\*\*:\s*`([^`]+)`'),
-            "grok_key":   re.compile(r'\*\*Grok API Key\*\*:\s*`([^`]+)`'),
-            "grok_url":   re.compile(r'\*\*Grok API URL\*\*:\s*`([^`]+)`'),
-            "grok_model": re.compile(r'\*\*Grok Model\*\*:\s*`([^`]+)`'),
-        }
-        # Fallback: table row format "Search (Grok) | API URL: `...`, Model: `...` | Key: `...`"
-        _GROK_TABLE_RE = re.compile(
-            r'Search\s*\(Grok\)\s*\|[^|]*API\s*URL:\s*`([^`]+)`'
-            r'[^|]*Model:\s*`([^`]+)`'
-            r'[^|]*\|\s*Key:\s*`([^`]+)`'
-        )
+    # 1. Credentials file (primary)
+    cred_path = _find_credentials()
+    if cred_path:
         try:
-            with open(tools_md) as f:
-                text = f.read()
-            for key_name, pattern in _KEY_PATTERNS.items():
-                m = pattern.search(text)
-                if m:
-                    keys[key_name] = m.group(1)
-            # Fallback: parse Grok from table row if not found via **bold** patterns
-            if "grok_url" not in keys:
-                m = _GROK_TABLE_RE.search(text)
-                if m:
-                    keys["grok_url"] = m.group(1)
-                    keys["grok_model"] = m.group(2)
-                    keys["grok_key"] = m.group(3)
-        except FileNotFoundError:
+            with open(cred_path) as f:
+                cred = json.load(f)
+            if v := cred.get("exa"):
+                keys["exa"] = v
+            if v := cred.get("tavily"):
+                keys["tavily"] = v
+            if grok := cred.get("grok"):
+                if isinstance(grok, dict):
+                    keys["grok_url"] = grok.get("apiUrl", "")
+                    keys["grok_key"] = grok.get("apiKey", "")
+                    keys["grok_model"] = grok.get("model", "grok-4.1-fast")
+        except (json.JSONDecodeError, FileNotFoundError):
             pass
-    # Env vars override file
+    # 2. Env vars (override / fallback for users without credentials file)
     if v := os.environ.get("EXA_API_KEY"):
         keys["exa"] = v
     if v := os.environ.get("TAVILY_API_KEY"):
