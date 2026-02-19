@@ -12,7 +12,7 @@
 
 | Skill | 干什么的 |
 |-------|---------| 
-| **[search-layer](./search-layer/)** | 多源搜索（Exa + Tavily + Grok）+ 意图感知评分 + 自动去重。Brave 由 OpenClaw 内置的 `web_search` 提供。 |
+| **[search-layer](./search-layer/)** | 四源并行搜索（Brave + Exa + Tavily + Grok）+ 意图感知评分 + 自动去重。Brave 由 OpenClaw 内置的 `web_search` 提供，Grok 通过 Completions API 调用。 |
 | **[content-extract](./content-extract/)** | URL → 干净的 Markdown。遇到反爬站点（微信、知乎）自动降级到 MinerU 解析。 |
 | **[mineru-extract](./mineru-extract/)** | [MinerU](https://mineru.net) 官方 API 的封装层。把 PDF、Office 文档、HTML 页面转成 Markdown。 |
 
@@ -26,7 +26,17 @@ github-explorer（独立 repo）
 └── OpenClaw 内置工具 ── web_search (Brave), web_fetch, browser
 ```
 
-## search-layer v2.1 新特性（最新）
+## search-layer v2.2 新特性（最新）
+
+v2.2 增强了 Grok 源的稳定性，新增源过滤功能：
+
+- **源过滤**：`--source grok,exa` 指定只使用特定搜索源，方便测试和对比
+- **默认模型升级**：Grok 默认模型从 `grok-4.1` 切换到 `grok-4.1-fast`（更快更稳定）
+- **Thinking 标签处理**：自动剥离 Grok thinking 模型的 `<think>` 标签
+- **JSON 提取增强**：处理 Grok 在 JSON 前输出自然语言文字的情况（`raw_decode` + `rfind` fallback）
+- **Table 格式配置**：支持从 TOOLS.md 表格格式加载 Grok 凭据（除原有的 `**bold**` 格式外）
+
+## search-layer v2.1 特性
 
 v2.1 新增 **Grok (xAI)** 作为第四搜索源，通过 Completions API 调用，支持 API 代理站：
 
@@ -87,10 +97,18 @@ export EXA_API_KEY="your-exa-key"        # https://exa.ai
 export TAVILY_API_KEY="your-tavily-key"  # https://tavily.com
 export GROK_API_URL="https://api.x.ai/v1"  # xAI API（或兼容的代理站）
 export GROK_API_KEY="your-grok-key"      # https://console.x.ai
-export GROK_MODEL="grok-4.1"            # 可选，默认 grok-4.1
+export GROK_MODEL="grok-4.1-fast"        # 可选，默认 grok-4.1-fast
 ```
 
 **或写到 TOOLS.md（OpenClaw workspace 根目录）：**
+
+方式一（表格格式）：
+
+```markdown
+| Search (Grok) | API URL: `https://api.x.ai/v1`, Model: `grok-4.1-fast` | Key: `your-grok-key` |
+```
+
+方式二（列表格式）：
 
 ```markdown
 ### Search
@@ -99,8 +117,10 @@ export GROK_MODEL="grok-4.1"            # 可选，默认 grok-4.1
 - **Tavily**: `your-tavily-key`
 - **Grok API URL**: `https://api.x.ai/v1`
 - **Grok API Key**: `your-grok-key`
-- **Grok Model**: `grok-4.1`
+- **Grok Model**: `grok-4.1-fast`
 ```
+
+> 💡 Grok 配置可选。缺失时自动降级为 Exa + Tavily 双源。
 
 ### MinerU Token（可选，content-extract 需要）
 
@@ -138,11 +158,19 @@ python3 search-layer/scripts/search.py "Deno 2.0 latest" --mode deep --intent st
 # 域名加权
 python3 search-layer/scripts/search.py "Rust CLI tutorial" --mode answer --intent tutorial \
   --domain-boost dev.to,realpython.com
+
+# 单源测试（仅 Grok）
+python3 search-layer/scripts/search.py "OpenAI latest news" --mode deep --source grok --num 5
+
+# 指定多源（排除 Grok）
+python3 search-layer/scripts/search.py "RAG comparison" --mode deep --source exa,tavily --num 5
 ```
 
-模式：`fast`（仅 Exa，无 key 时降级到 Grok）、`deep`（Exa + Tavily + Grok 并行）、`answer`（Tavily 带 AI 摘要）
+模式：`fast`（Exa 优先，Grok fallback）、`deep`（Exa + Tavily + Grok 并行）、`answer`（Tavily 带 AI 摘要）
 
 意图：`factual`、`status`、`comparison`、`tutorial`、`exploratory`、`news`、`resource`
+
+源过滤：`--source grok`、`--source exa,tavily`、不指定则使用全部可用源
 
 ### content-extract
 
@@ -161,7 +189,7 @@ python3 mineru-extract/scripts/mineru_extract.py "https://example.com/paper.pdf"
 - [OpenClaw](https://github.com/openclaw/openclaw)（agent 运行时）
 - Python 3.10+
 - `requests`（pip install）
-- API Keys：Exa 和/或 Tavily（用于 search-layer），Grok（可选，用于第四搜索源），MinerU token（可选，用于 content-extract）
+- API Keys：Exa 和/或 Tavily（用于 search-layer），Grok API（可选，用于第四搜索源），MinerU token（可选，用于 content-extract）
 
 ## License
 

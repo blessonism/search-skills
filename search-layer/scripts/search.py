@@ -269,7 +269,7 @@ def get_keys():
     keys = {}
     tools_md = _find_tools_md()
     if tools_md:
-        # Regex patterns: match **Label**: `value` with flexible whitespace
+        # Regex patterns: match **Label**: `value` or table format with flexible whitespace
         _KEY_PATTERNS = {
             "exa":        re.compile(r'\*\*Exa\*\*:\s*`([^`]+)`'),
             "tavily":     re.compile(r'\*\*Tavily\*\*:\s*`([^`]+)`'),
@@ -277,6 +277,12 @@ def get_keys():
             "grok_url":   re.compile(r'\*\*Grok API URL\*\*:\s*`([^`]+)`'),
             "grok_model": re.compile(r'\*\*Grok Model\*\*:\s*`([^`]+)`'),
         }
+        # Fallback: table row format "Search (Grok) | API URL: `...`, Model: `...` | Key: `...`"
+        _GROK_TABLE_RE = re.compile(
+            r'Search\s*\(Grok\)\s*\|[^|]*API\s*URL:\s*`([^`]+)`'
+            r'[^|]*Model:\s*`([^`]+)`'
+            r'[^|]*\|\s*Key:\s*`([^`]+)`'
+        )
         try:
             with open(tools_md) as f:
                 text = f.read()
@@ -284,6 +290,13 @@ def get_keys():
                 m = pattern.search(text)
                 if m:
                     keys[key_name] = m.group(1)
+            # Fallback: parse Grok from table row if not found via **bold** patterns
+            if "grok_url" not in keys:
+                m = _GROK_TABLE_RE.search(text)
+                if m:
+                    keys["grok_url"] = m.group(1)
+                    keys["grok_model"] = m.group(2)
+                    keys["grok_key"] = m.group(3)
         except FileNotFoundError:
             pass
     # Env vars override file
@@ -319,7 +332,7 @@ def normalize_url(url: str) -> str:
 # Search source functions
 # ---------------------------------------------------------------------------
 @_throttled
-def search_grok(query: str, api_url: str, api_key: str, model: str = "grok-4.1",
+def search_grok(query: str, api_url: str, api_key: str, model: str = "grok-4.1-fast",
                 num: int = 5, freshness: str = None) -> list:
     """Use Grok model via completions API as a search source.
     Grok has strong real-time knowledge; we ask it to return structured results."""
@@ -429,11 +442,30 @@ def search_grok(query: str, api_url: str, api_key: str, model: str = "grok-4.1",
             if isinstance(content, list):
                 # Some APIs return content as list of parts
                 content = " ".join(str(p.get("text", p)) if isinstance(p, dict) else str(p) for p in content)
+        # Strip thinking tags (Grok thinking models include <think>...</think>)
+        content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL)
         # Strip markdown code fences if present
         content = content.strip()
         if content.startswith("```"):
             content = re.sub(r'^```(?:json)?\s*', '', content)
             content = re.sub(r'\s*```$', '', content)
+
+        # Extract JSON object if surrounded by non-JSON text
+        content = content.strip()
+        if not content.startswith("{"):
+            # Find the first { and match to its closing }
+            start_idx = content.find("{")
+            if start_idx != -1:
+                # Use json.JSONDecoder to find the end of the JSON object
+                try:
+                    decoder = json.JSONDecoder()
+                    parsed_obj, end_idx = decoder.raw_decode(content, start_idx)
+                    content = content[start_idx:start_idx + end_idx]
+                except json.JSONDecodeError:
+                    # Fallback: take from first { to last }
+                    last_brace = content.rfind("}")
+                    if last_brace != -1:
+                        content = content[start_idx:last_brace + 1]
 
         parsed = json.loads(content)
         results = []
@@ -553,21 +585,27 @@ def dedup(results: list) -> list:
 # ---------------------------------------------------------------------------
 def execute_search(query: str, mode: str, keys: dict, num: int,
                    include_answer: bool = False,
-                   freshness: str = None) -> tuple:
-    """Execute search for a single query. Returns (results_list, answer_text)."""
+                   freshness: str = None,
+                   sources: set = None) -> tuple:
+    """Execute search for a single query. Returns (results_list, answer_text).
+    If sources is set, only run those sources (e.g. {'grok', 'exa', 'tavily'})."""
     all_results = []
     answer_text = None
+
+    # Source filter helper
+    def _want(name: str) -> bool:
+        return sources is None or name in sources
 
     # Grok config
     grok_url = keys.get("grok_url")
     grok_key = keys.get("grok_key")
-    grok_model = keys.get("grok_model", "grok-4.1")
+    grok_model = keys.get("grok_model", "grok-4.1-fast")
     has_grok = bool(grok_url and grok_key)
 
     if mode == "fast":
-        if "exa" in keys:
+        if "exa" in keys and _want("exa"):
             all_results = search_exa(query, keys["exa"], num)
-        elif has_grok:
+        elif has_grok and _want("grok"):
             all_results = search_grok(query, grok_url, grok_key, grok_model, num, freshness)
         else:
             print('{"warning": "No API keys found for fast mode"}',
@@ -576,13 +614,13 @@ def execute_search(query: str, mode: str, keys: dict, num: int,
     elif mode == "deep":
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
             futures = {}
-            if "exa" in keys:
+            if "exa" in keys and _want("exa"):
                 futures[pool.submit(search_exa, query, keys["exa"], num)] = "exa"
-            if "tavily" in keys:
+            if "tavily" in keys and _want("tavily"):
                 futures[pool.submit(
                     search_tavily, query, keys["tavily"], num,
                     freshness=freshness)] = "tavily"
-            if has_grok:
+            if has_grok and _want("grok"):
                 futures[pool.submit(
                     search_grok, query, grok_url, grok_key, grok_model, num, freshness)] = "grok"
             for fut in concurrent.futures.as_completed(futures):
@@ -598,7 +636,7 @@ def execute_search(query: str, mode: str, keys: dict, num: int,
                     all_results.extend(res)
 
     elif mode == "answer":
-        if "tavily" not in keys:
+        if "tavily" not in keys or not _want("tavily"):
             print('{"warning": "Tavily API key not found"}', file=sys.stderr)
         else:
             tav = search_tavily(query, keys["tavily"], num,
@@ -631,6 +669,8 @@ def main():
                     help="Freshness filter (pd=24h, pw=week, pm=month, py=year)")
     ap.add_argument("--domain-boost", default=None,
                     help="Comma-separated domains to boost in scoring")
+    ap.add_argument("--source", default=None,
+                    help="Comma-separated sources to use (exa,tavily,grok). Default: all available")
     args = ap.parse_args()
 
     # Determine queries
@@ -646,6 +686,9 @@ def main():
     boost_domains = set()
     if args.domain_boost:
         boost_domains = {d.strip() for d in args.domain_boost.split(",")}
+    source_filter = None
+    if args.source:
+        source_filter = {s.strip() for s in args.source.split(",")}
 
     # Execute all queries (parallel if multiple)
     all_results = []
@@ -655,7 +698,8 @@ def main():
         results, answer_text = execute_search(
             queries[0], args.mode, keys, args.num,
             include_answer=(args.mode == "answer"),
-            freshness=args.freshness)
+            freshness=args.freshness,
+            sources=source_filter)
         all_results = results
     else:
         # Cap outer concurrency: each query may spawn up to 3 inner threads (deep mode),
@@ -664,7 +708,8 @@ def main():
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
             futures = {
                 pool.submit(execute_search, q, args.mode, keys, args.num,
-                            freshness=args.freshness): q
+                            freshness=args.freshness,
+                            sources=source_filter): q
                 for q in queries
             }
             for fut in concurrent.futures.as_completed(futures):
