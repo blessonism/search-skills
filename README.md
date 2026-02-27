@@ -6,7 +6,7 @@
 
 一组 [OpenClaw](https://github.com/openclaw/openclaw) 技能（Skills），提供 **多源搜索** 和 **内容提取** 能力。
 
-主要为 [github-explorer](https://github.com/blessonism/github-explorer-skill) 提供底层支撑，也可以独立使用。
+一开始是为 [github-explorer](https://github.com/blessonism/github-explorer-skill) 提供底层支撑，现在独立为高频次使用的 skill。
 
 ## 包含什么
 
