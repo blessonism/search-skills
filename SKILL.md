@@ -1,11 +1,13 @@
 ---
 name: search-layer
 description: >
-  Multi-source search and deduplication layer with intent-aware scoring.
-  Integrates Brave Search (web_search), Exa, Tavily, and Grok to provide
-  high-coverage, high-quality results. Automatically classifies query intent
-  and adjusts search strategy, scoring weights, and result synthesis accordingly.
-  Triggers on "deep search", "multi-source search", or when high-quality research is needed.
+  DEFAULT search tool for ALL search/lookup needs. Multi-source search and deduplication
+  layer with intent-aware scoring. Integrates Brave Search (web_search), Exa, Tavily,
+  and Grok to provide high-coverage, high-quality results. Automatically classifies
+  query intent and adjusts search strategy, scoring weights, and result synthesis.
+  Use for ANY query that requires web search — factual lookups, research, news,
+  comparisons, resource finding, "what is X", status checks, etc. Do NOT use raw
+  web_search directly; always route through this skill.
 ---
 
 # Search Layer v2.2 — 意图感知多源检索协议
@@ -127,6 +129,62 @@ python3 /home/node/.openclaw/workspace/skills/search-layer/scripts/search.py \
 将 Brave 结果与 search.py 输出合并。按 canonical URL 去重，标记来源。
 
 如果 search.py 返回了 `score` 字段，用它排序；Brave 结果没有 score 的，用同样的意图权重公式补算。
+
+---
+
+## Phase 3.5: 引用追踪（Thread Pulling）
+
+当搜索结果中包含 GitHub issue/PR 链接，且意图为 Status 或 Exploratory 时，自动触发引用追踪。
+
+### 自动触发条件
+
+- 意图为 `status` 或 `exploratory`
+- 搜索结果中包含 `github.com/.../issues/` 或 `github.com/.../pull/` URL
+
+### 方式 1: search.py --extract-refs（批量）
+
+在搜索结果上直接提取引用图，无需额外调用：
+
+```bash
+python3 search.py "OpenClaw config validation bug" --mode deep --intent status --extract-refs
+```
+
+输出中会多一个 `refs` 字段，包含每个结果 URL 的引用列表。
+
+也可以跳过搜索，直接对已知 URL 提取引用：
+
+```bash
+python3 search.py --extract-refs-urls "https://github.com/owner/repo/issues/123" "https://github.com/owner/repo/issues/456"
+```
+
+### 方式 2: fetch-thread（单 URL 深度抓取）
+
+对单个 URL 拉取完整讨论流 + 结构化引用：
+
+```bash
+python3 fetch_thread.py "https://github.com/owner/repo/issues/123" --format json
+python3 fetch_thread.py "https://github.com/owner/repo/issues/123" --format markdown
+python3 fetch_thread.py "https://github.com/owner/repo/issues/123" --extract-refs-only
+```
+
+GitHub 场景（issue/PR）：通过 API 拉取正文 + 全部 comments + timeline 事件（cross-references、commits），提取：
+- Issue/PR 引用（#123、owner/repo#123）
+- Duplicate 标记
+- Commit 引用
+- 关联 PR/issue（timeline cross-references）
+- 外部 URL
+
+通用 web 场景：web fetch + 正则提取引用链接。
+
+### Agent 执行流程
+
+```
+Step 1: search-layer 搜索 → 获取初始结果
+Step 2: search.py --extract-refs 或 fetch-thread → 提取线索图
+Step 3: Agent 筛选高价值线索（LLM 判断哪些值得追踪）
+Step 4: fetch-thread 深度抓取每个高价值线索
+Step 5: 重复 Step 2-4，直到信息闭环或达到深度限制（建议 max_depth=3）
+```
 
 ---
 

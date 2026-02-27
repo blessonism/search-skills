@@ -33,6 +33,7 @@ from datetime import datetime, timezone, timedelta
 from urllib.parse import urlparse, urlencode, parse_qs, urlunparse
 from pathlib import Path
 import threading
+import importlib.util
 
 # Global concurrency limiter: cap total HTTP threads across nested pools.
 # Multi-query deep mode spawns outer_workers × 3 inner threads; this semaphore
@@ -633,6 +634,57 @@ def execute_search(query: str, mode: str, keys: dict, num: int,
 
 
 # ---------------------------------------------------------------------------
+# Extract refs integration (uses fetch_thread module)
+# ---------------------------------------------------------------------------
+def _load_fetch_thread():
+    """Dynamically import fetch_thread from the same directory."""
+    ft_path = Path(__file__).parent / "fetch_thread.py"
+    if not ft_path.exists():
+        print(f"[extract-refs] fetch_thread.py not found at {ft_path}", file=sys.stderr)
+        return None
+    spec = importlib.util.spec_from_file_location("fetch_thread", str(ft_path))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _run_extract_refs(urls: list) -> list:
+    """For each URL, fetch content and extract references.
+    Returns list of {source_url, refs: [{type, url, context}]}."""
+    ft = _load_fetch_thread()
+    if not ft:
+        return [{"error": "fetch_thread module not available"}]
+
+    results = []
+
+    def _fetch_one(url: str) -> dict:
+        try:
+            gh = ft._parse_github_url(url)
+            token = ft._find_github_token()
+            if gh and gh["type"] in ("issue", "pr"):
+                data = ft.fetch_github_issue(
+                    gh["owner"], gh["repo"], gh["number"], token, max_comments=50)
+            else:
+                data = ft.fetch_web_page(url)
+            return {
+                "source_url": url,
+                "refs": data.get("refs", []),
+                "ref_count": len(data.get("refs", [])),
+            }
+        except Exception as e:
+            return {"source_url": url, "refs": [], "ref_count": 0,
+                    "error": str(e)}
+
+    # Parallel fetch with bounded concurrency
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+        futures = {pool.submit(_fetch_one, u): u for u in urls[:20]}  # Cap at 20 URLs
+        for fut in concurrent.futures.as_completed(futures):
+            results.append(fut.result())
+
+    return results
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 def main():
@@ -656,6 +708,10 @@ def main():
                     help="Comma-separated domains to boost in scoring")
     ap.add_argument("--source", default=None,
                     help="Comma-separated sources to use (exa,tavily,grok). Default: all available")
+    ap.add_argument("--extract-refs", action="store_true",
+                    help="After search, fetch each result URL and extract structured references")
+    ap.add_argument("--extract-refs-urls", nargs="+", default=None,
+                    help="Extract refs from these URLs directly (skip search)")
     args = ap.parse_args()
 
     # Determine queries
@@ -664,8 +720,20 @@ def main():
         queries = args.queries
     elif args.query:
         queries = [args.query]
+    elif args.extract_refs_urls:
+        # No search needed, just extract refs from provided URLs
+        output = {
+            "mode": "extract-refs-only",
+            "intent": args.intent,
+            "queries": [],
+            "count": 0,
+            "results": [],
+            "refs": _run_extract_refs(args.extract_refs_urls),
+        }
+        print(json.dumps(output, ensure_ascii=False, indent=2))
+        return
     else:
-        ap.error("Provide a query positional argument or --queries")
+        ap.error("Provide a query positional argument, --queries, or --extract-refs-urls")
 
     keys = get_keys()
     boost_domains = set()
@@ -725,6 +793,12 @@ def main():
         output["answer"] = answer_text
     if args.freshness:
         output["freshness_filter"] = args.freshness
+
+    # --extract-refs: extract references from result URLs or explicit URL list
+    if args.extract_refs or args.extract_refs_urls:
+        output["refs"] = _run_extract_refs(
+            urls=args.extract_refs_urls or [r["url"] for r in deduped],
+        )
 
     print(json.dumps(output, ensure_ascii=False, indent=2))
 
