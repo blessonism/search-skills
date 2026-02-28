@@ -135,10 +135,10 @@ v2.1 新增 **Grok (xAI)** 作为第四搜索源，通过 Completions API 调用
 v2 借鉴了 [Anthropic knowledge-work-plugins](https://github.com/anthropics/knowledge-work-plugins) 的 enterprise-search 设计，新增：
 
 - **意图分类**：7 种查询意图（factual / status / comparison / tutorial / exploratory / news / resource），自动调整搜索策略和评分权重
-- **多查询并行**：`--queries "q1" "q2" "q3"\` 同时执行多个子查询
-- **意图感知评分**：`score = w_keyword × keyword_match + w_freshness × freshness_score + w_authority × authority_score\`，权重由意图类型决定
+- **多查询并行**：`--queries "q1" "q2" "q3"` 同时执行多个子查询
+- **意图感知评分**：`score = w_keyword × keyword_match + w_freshness × freshness_score + w_authority × authority_score`，权重由意图类型决定
 - **域名权威性评分**：内置四级域名评分表（60+ 域名 + 模式匹配规则）
-- **Freshness 过滤**：`--freshness pd/pw/pm/py\` 实际传递给 Tavily
+- **Freshness 过滤**：`--freshness pd/pw/pm/py` 实际传递给 Tavily
 - **Domain Boost**：`--domain-boost github.com,stackoverflow.com` 提升特定域名权重
 - **完全向后兼容**：不带新参数时行为与 v1 一致
 
