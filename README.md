@@ -113,11 +113,11 @@ python3 search-layer/scripts/search.py --extract-refs-urls \
 
 v2.2 增强了 Grok 源的稳定性，新增源过滤功能：
 
-- **源过滤**：\`--source grok,exa\` 指定只使用特定搜索源，方便测试和对比
-- **默认模型升级**：Grok 默认模型从 \`grok-4.1\` 切换到 \`grok-4.1-fast\`（更快更稳定）
-- **Thinking 标签处理**：自动剥离 Grok thinking 模型的 \`<think>\` 标签
-- **JSON 提取增强**：处理 Grok 在 JSON 前输出自然语言文字的情况（\`raw_decode\` + \`rfind\` fallback）
-- **Credentials 文件**：统一凭据管理，\`~/.openclaw/credentials/search.json\` 集中存放所有搜索源 key
+- **源过滤**：`--source grok,exa` 指定只使用特定搜索源，方便测试和对比
+- **默认模型升级**：Grok 默认模型从 `grok-4.1` 切换到 `grok-4.1-fast`（更快更稳定）
+- **Thinking 标签处理**：自动剥离 Grok thinking 模型的 `<think>` 标签
+- **JSON 提取增强**：处理 Grok 在 JSON 前输出自然语言文字的情况（`raw_decode` + `rfind` fallback）
+- **Credentials 文件**：统一凭据管理，`~/.openclaw/credentials/search.json` 集中存放所有搜索源 key
 
 ## search-layer v2.1 特性
 
@@ -127,19 +127,19 @@ v2.1 新增 **Grok (xAI)** 作为第四搜索源，通过 Completions API 调用
 - **四源并行**：Deep 模式下 Exa + Tavily + Grok 三源并行（加上 agent 层的 Brave 共四源）
 - **智能降级**：Grok 配置缺失时自动降级为 Exa + Tavily 双源，不影响现有流程
 - **SSE 兼容**：自动检测并处理 API 代理强制 stream 的情况
-- **安全加固**：查询注入防护（\`<query>\` 标签隔离）、URL scheme 验证（仅 http/https）
-- **日期提取**：Grok 结果包含 \`published_date\`，参与新鲜度评分
+- **安全加固**：查询注入防护（`<query>` 标签隔离）、URL scheme 验证（仅 http/https）
+- **日期提取**：Grok 结果包含 `published_date`，参与新鲜度评分
 
 ## search-layer v2 特性
 
 v2 借鉴了 [Anthropic knowledge-work-plugins](https://github.com/anthropics/knowledge-work-plugins) 的 enterprise-search 设计，新增：
 
 - **意图分类**：7 种查询意图（factual / status / comparison / tutorial / exploratory / news / resource），自动调整搜索策略和评分权重
-- **多查询并行**：\`--queries "q1" "q2" "q3"\` 同时执行多个子查询
-- **意图感知评分**：\`score = w_keyword × keyword_match + w_freshness × freshness_score + w_authority × authority_score\`，权重由意图类型决定
+- **多查询并行**：`--queries "q1" "q2" "q3"\` 同时执行多个子查询
+- **意图感知评分**：`score = w_keyword × keyword_match + w_freshness × freshness_score + w_authority × authority_score\`，权重由意图类型决定
 - **域名权威性评分**：内置四级域名评分表（60+ 域名 + 模式匹配规则）
-- **Freshness 过滤**：\`--freshness pd/pw/pm/py\` 实际传递给 Tavily
-- **Domain Boost**：\`--domain-boost github.com,stackoverflow.com\` 提升特定域名权重
+- **Freshness 过滤**：`--freshness pd/pw/pm/py\` 实际传递给 Tavily
+- **Domain Boost**：`--domain-boost github.com,stackoverflow.com` 提升特定域名权重
 - **完全向后兼容**：不带新参数时行为与 v1 一致
 
 ---
@@ -154,7 +154,7 @@ v2 借鉴了 [Anthropic knowledge-work-plugins](https://github.com/anthropics/kn
 
 ### 方式二：手动安装
 
-\`\`\`bash
+```bash
 # 1. Clone 到任意位置
 mkdir -p ~/.openclaw/workspace/_repos
 git clone https://github.com/blessonism/openclaw-search-skills.git \
@@ -166,9 +166,9 @@ cd ~/.openclaw/workspace/skills
 ln -s ~/.openclaw/workspace/_repos/openclaw-search-skills/search-layer search-layer
 ln -s ~/.openclaw/workspace/_repos/openclaw-search-skills/content-extract content-extract
 ln -s ~/.openclaw/workspace/_repos/openclaw-search-skills/mineru-extract mineru-extract
-\`\`\`
+```
 
-> 💡 skills 目录因安装方式不同可能不同，常见的是 \`~/.openclaw/workspace/skills/\` 或 \`~/.openclaw/skills/\`。
+> 💡 skills 目录因安装方式不同可能不同，常见的是 `~/.openclaw/workspace/skills/` 或 `~/.openclaw/skills/`。
 
 ---
 
@@ -178,9 +178,9 @@ ln -s ~/.openclaw/workspace/_repos/openclaw-search-skills/mineru-extract mineru-
 
 **方式一：Credentials 文件（推荐）**
 
-创建 \`~/.openclaw/credentials/search.json\`：
+创建 `~/.openclaw/credentials/search.json`：
 
-\`\`\`json
+```json
 {
   "exa": "your-exa-key",
   "tavily": "your-tavily-key",
@@ -190,42 +190,42 @@ ln -s ~/.openclaw/workspace/_repos/openclaw-search-skills/mineru-extract mineru-
     "model": "grok-4.1-fast"
   }
 }
-\`\`\`
+```
 
 > 💡 Grok 配置可选。缺失时自动降级为 Exa + Tavily 双源。
 
 **方式二：环境变量（兼容）**
 
-\`\`\`bash
+```bash
 export EXA_API_KEY="your-exa-key"        # https://exa.ai
 export TAVILY_API_KEY="your-tavily-key"  # https://tavily.com
 export GROK_API_URL="https://api.x.ai/v1"  # 可选
 export GROK_API_KEY="your-grok-key"      # 可选
 export GROK_MODEL="grok-4.1-fast"        # 可选，默认 grok-4.1-fast
-\`\`\`
+```
 
 环境变量会覆盖 credentials 文件中的同名配置。
 
-Brave API Key 由 OpenClaw 内置的 \`web_search\` 工具管理，不需要在这里配置。
+Brave API Key 由 OpenClaw 内置的 `web_search` 工具管理，不需要在这里配置。
 
 ### MinerU Token（可选，content-extract 需要）
 
 只有当你需要抓取微信/知乎/小红书等反爬站点时才需要：
 
-\`\`\`bash
+```bash
 cp mineru-extract/.env.example mineru-extract/.env
 # 编辑 .env，填入你的 MinerU token（从 https://mineru.net/apiManage 获取）
-\`\`\`
+```
 
 ### Python 依赖
 
-\`\`\`bash
+```bash
 # 基础依赖（search-layer v2.x）
 pip install requests
 
 # v3.0 链式追踪新增依赖
 pip install trafilatura beautifulsoup4 lxml
-\`\`\`
+```
 
 ---
 
@@ -233,7 +233,7 @@ pip install trafilatura beautifulsoup4 lxml
 
 ### search-layer
 
-\`\`\`bash
+```bash
 # 基础搜索（v1 兼容模式）
 python3 search-layer/scripts/search.py "RAG framework comparison" --mode deep --num 5
 
@@ -252,15 +252,15 @@ python3 search-layer/scripts/search.py "OpenAI latest news" --mode deep --source
 
 # 搜索 + 链式追踪（v3.0）
 python3 search-layer/scripts/search.py "OpenClaw config bug" --mode deep --intent status --extract-refs
-\`\`\`
+```
 
-模式：\`fast\`（Exa 优先）、\`deep\`（Exa + Tavily + Grok 并行）、\`answer\`（Tavily 带 AI 摘要）
+模式：`fast`（Exa 优先）、`deep`（Exa + Tavily + Grok 并行）、`answer`（Tavily 带 AI 摘要）
 
-意图：\`factual\`、\`status\`、\`comparison\`、\`tutorial\`、\`exploratory\`、\`news\`、\`resource\`
+意图：`factual`、`status`、`comparison`、`tutorial`、`exploratory`、`news`、`resource`
 
 ### fetch_thread.py（v3.0 新增）
 
-\`\`\`bash
+```bash
 # GitHub issue / PR
 python3 search-layer/scripts/fetch_thread.py "https://github.com/owner/repo/issues/123"
 python3 search-layer/scripts/fetch_thread.py "https://github.com/owner/repo/pull/456" --format markdown
@@ -271,19 +271,19 @@ python3 search-layer/scripts/fetch_thread.py "https://github.com/owner/repo/issu
 # HN / Reddit / V2EX / 任意网页
 python3 search-layer/scripts/fetch_thread.py "https://news.ycombinator.com/item?id=43197966"
 python3 search-layer/scripts/fetch_thread.py "https://www.reddit.com/r/Python/comments/abc123/title/"
-\`\`\`
+```
 
 ### content-extract
 
-\`\`\`bash
+```bash
 python3 content-extract/scripts/content_extract.py --url "https://mp.weixin.qq.com/s/some-article"
-\`\`\`
+```
 
 ### mineru-extract
 
-\`\`\`bash
+```bash
 python3 mineru-extract/scripts/mineru_extract.py "https://example.com/paper.pdf" --model pipeline --print
-\`\`\`
+```
 
 ---
 
@@ -291,8 +291,8 @@ python3 mineru-extract/scripts/mineru_extract.py "https://example.com/paper.pdf"
 
 - [OpenClaw](https://github.com/openclaw/openclaw)（agent 运行时）
 - Python 3.10+
-- \`requests\`（基础依赖）
-- \`trafilatura\`、\`beautifulsoup4\`、\`lxml\`（v3.0 链式追踪依赖）
+- `requests`（基础依赖）
+- `trafilatura`、`beautifulsoup4`、`lxml`（v3.0 链式追踪依赖）
 - API Keys：Exa 和/或 Tavily（search-layer），Grok API（可选，第四搜索源），MinerU token（可选，content-extract）
 
 ## License
