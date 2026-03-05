@@ -2,7 +2,7 @@
 
 搜索意图分类的详细指南。Agent 在执行搜索前，先根据此指南判断用户查询的意图类型，然后选择对应的搜索策略。
 
-## 七种意图类型
+## 八种意图类型
 
 ### 1. Factual（事实查询）
 
@@ -149,13 +149,35 @@ keyword_match: 0.3, freshness: 0.6, authority: 0.1
 keyword_match: 0.5, freshness: 0.1, authority: 0.4
 ```
 
+---
+
+### 8. Academic（学术检索）
+
+**识别信号**：
+- "X 论文"、"X 研究"、"X paper"、"X journal"
+- 查询学术数据库：PubMed、arXiv、Semantic Scholar、OpenAlex
+- 术语倾向：hypothesis、methodology、doi、citation
+
+**搜索策略**：
+- Mode: `academic`
+- Freshness: `py`（过去一年，可按主题调整）
+- 查询扩展: 加 `paper`、`research`、`study`、`publication`，并生成英文变体
+- Domain boost: `arxiv.org,nature.com,science.org,cell.com,ieeexplore.ieee.org,pubmed.ncbi.nlm.nih.gov`
+- 结果偏好: 顶会/期刊 > 预印本 > 技术博客
+
+**权重配置**：`--intent academic`
+```
+keyword_match: 0.3, freshness: 0.2, authority: 0.7
+```
+
 ## 意图判断流程
 
 ```
 1. 扫描查询中的信号词（见各类型的"识别信号"）
-2. 如果匹配多个类型，按优先级选择：Resource > News > Status > Comparison > Tutorial > Factual > Exploratory
+2. 如果匹配多个类型，按优先级选择：Resource > Academic > News > Status > Comparison > Tutorial > Factual > Exploratory
    - 例："Deno 最新版本下载" 同时匹配 Status 和 Resource → 选 Resource
    - 例："Bun vs Deno 最新对比" 同时匹配 Comparison 和 Status → 选 Comparison（但加 freshness）
+   - 例："Transformer 论文最新进展" 同时匹配 Academic 和 Status → 选 Academic（并加 freshness）
 3. 如果无法判断，默认 exploratory
 4. 中文查询同时生成英文变体（技术类查询）
 ```

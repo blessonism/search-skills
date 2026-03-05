@@ -2,7 +2,7 @@
   "_comment": "Domain authority tiers for search result scoring. Score 0.0-1.0.",
   "tier1": {
     "score": 1.0,
-    "description": "Official docs, primary sources, major platforms",
+    "description": "Official docs, primary sources, major platforms, academic primary venues",
     "domains": [
       "github.com",
       "gitlab.com",
@@ -36,7 +36,21 @@
       "crates.io",
       "pypi.org",
       "npmjs.com",
-      "pkg.go.dev"
+      "pkg.go.dev",
+      "nature.com",
+      "science.org",
+      "cell.com",
+      "pubmed.ncbi.nlm.nih.gov",
+      "ieeexplore.ieee.org",
+      "dl.acm.org",
+      "aclanthology.org",
+      "neurips.cc",
+      "iclr.cc",
+      "icml.cc",
+      "proceedings.mlr.press",
+      "openreview.net",
+      "semanticscholar.org",
+      "openalex.org"
     ]
   },
   "tier2": {
@@ -63,8 +77,9 @@
       "anthropic.com",
       "huggingface.co",
       "papers.nips.cc",
-      "aclanthology.org",
-      "distill.pub"
+      "distill.pub",
+      "biorxiv.org",
+      "medrxiv.org"
     ]
   },
   "tier3": {
@@ -95,7 +110,6 @@
     ]
   },
   "tier4_default_score": 0.4,
-
   "pattern_rules": [
     {"pattern": "docs.*", "score": 0.9, "note": "Any docs.* subdomain likely official docs"},
     {"pattern": "*.github.io", "score": 0.7, "note": "GitHub Pages project sites"},

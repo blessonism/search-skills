@@ -1,24 +1,29 @@
 #!/usr/bin/env python3
 """
-Multi-source search v2.2: Exa + Tavily + Grok with intent-aware scoring and ranking.
+Multi-source search v3.1: Exa + Tavily + Grok + OpenAlex + Semantic Scholar
+with intent-aware scoring and ranking.
 Brave is handled by the agent via built-in web_search (cannot be called from script).
 
 Sources:
-  Exa    - semantic search, good for technical/academic content
-  Tavily - web search with AI answer, good for general/news content
-  Grok   - xAI model with strong real-time knowledge, via completions API
+  Exa              - semantic search, good for technical/academic content
+  Tavily           - web search with AI answer, good for general/news content
+  Grok             - xAI model with strong real-time knowledge, via completions API
+  OpenAlex         - free academic knowledge graph, 200M+ papers
+  SemanticScholar  - academic search API, citation-rich metadata
 
 Modes:
-  fast   - Exa only (lightweight, low latency); falls back to Grok if no Exa key
-  deep   - Exa + Tavily + Grok parallel (max coverage)
-  answer - Tavily search (includes AI-generated answer with citations)
+  fast     - Exa only (lightweight, low latency); falls back to Grok if no Exa key
+  deep     - Exa + Tavily + Grok parallel (max coverage)
+  answer   - Tavily search (includes AI-generated answer with citations)
+  academic - OpenAlex + Semantic Scholar + Tavily parallel (academic-focused)
 
 Intent types (affect scoring weights):
-  factual, status, comparison, tutorial, exploratory, news, resource
+  factual, status, comparison, tutorial, exploratory, news, resource, academic
 
 Usage:
   python3 search.py "query" --mode deep --num 5
   python3 search.py "query" --mode deep --intent status --freshness pw
+  python3 search.py "query" --mode academic --intent academic --export bibtex
   python3 search.py --queries "q1" "q2" --mode deep --intent comparison
   python3 search.py "query" --domain-boost github.com,stackoverflow.com
 """
@@ -29,6 +34,7 @@ import os
 import re
 import argparse
 import concurrent.futures
+import time
 from datetime import datetime, timezone, timedelta
 from urllib.parse import urlparse, urlencode, parse_qs, urlunparse
 from pathlib import Path
@@ -39,6 +45,7 @@ import importlib.util
 # Multi-query deep mode spawns outer_workers × 3 inner threads; this semaphore
 # ensures the total never exceeds 8 regardless of nesting.
 _THREAD_SEMAPHORE = threading.Semaphore(8)
+_SEMANTIC_LAST_REQUEST = {"time": 0.0}
 
 
 def _throttled(fn):
@@ -48,6 +55,15 @@ def _throttled(fn):
             return fn(*args, **kwargs)
     wrapper.__name__ = fn.__name__
     return wrapper
+
+
+def _semantic_rate_limit():
+    """未配置 API key 时，遵守 Semantic Scholar 的保守限速。"""
+    now = time.time()
+    elapsed = now - _SEMANTIC_LAST_REQUEST.get("time", 0.0)
+    if elapsed < 1.0:
+        time.sleep(1.0 - elapsed)
+    _SEMANTIC_LAST_REQUEST["time"] = time.time()
 
 
 try:
@@ -69,6 +85,7 @@ INTENT_WEIGHTS = {
     "exploratory": {"keyword": 0.3, "freshness": 0.2, "authority": 0.5},
     "news":        {"keyword": 0.3, "freshness": 0.6, "authority": 0.1},
     "resource":    {"keyword": 0.5, "freshness": 0.1, "authority": 0.4},
+    "academic":    {"keyword": 0.3, "freshness": 0.2, "authority": 0.7},
 }
 
 # ---------------------------------------------------------------------------
@@ -283,6 +300,10 @@ def get_keys():
                     keys["grok_url"] = grok.get("apiUrl", "")
                     keys["grok_key"] = grok.get("apiKey", "")
                     keys["grok_model"] = grok.get("model", "grok-4.1-fast")
+            if v := cred.get("openalex"):
+                keys["openalex"] = v
+            if v := cred.get("semantic"):
+                keys["semantic"] = v
         except (json.JSONDecodeError, FileNotFoundError):
             pass
     # 2. Env vars (override / fallback for users without credentials file)
@@ -296,6 +317,10 @@ def get_keys():
         keys["grok_url"] = v
     if v := os.environ.get("GROK_MODEL"):
         keys["grok_model"] = v
+    if v := os.environ.get("OPENALEX_API_KEY"):
+        keys["openalex"] = v
+    if v := os.environ.get("SEMANTIC_API_KEY"):
+        keys["semantic"] = v
     return keys
 
 
@@ -547,6 +572,150 @@ def search_tavily(query: str, key: str, num: int = 5,
         return {"results": [], "answer": None}
 
 
+@_throttled
+def search_openalex(query: str, api_key: str = None, num: int = 5,
+                    freshness: str = None) -> list:
+    """OpenAlex 学术检索（无 key 可用，有 key 限流更高）。"""
+    try:
+        params = {
+            "search": query,
+            "per-page": min(num, 25),
+        }
+        if freshness == "py":
+            year = datetime.now(timezone.utc).year - 1
+            params["filter"] = f"publication_year:>={year}"
+
+        headers = {
+            "User-Agent": "OpenClaw-Search-Layer/1.0",
+            "Accept": "application/json",
+        }
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+
+        r = requests.get(
+            f"https://api.openalex.org/works?{urlencode(params)}",
+            headers=headers,
+            timeout=20,
+        )
+        r.raise_for_status()
+        data = r.json()
+
+        results = []
+        for work in data.get("results", []):
+            title = work.get("display_name") or work.get("title") or ""
+            primary_loc = work.get("primary_location") or {}
+            url = primary_loc.get("landing_page_url") or primary_loc.get("url") or ""
+            doi = work.get("doi") or ""
+            if not url and doi:
+                url = f"https://doi.org/{doi}"
+            if not url:
+                continue
+
+            authorships = work.get("authorships") or []
+            author_names = [
+                a.get("author", {}).get("display_name", "")
+                for a in authorships[:3]
+                if a.get("author", {}).get("display_name")
+            ]
+            abstract = work.get("abstract") or ""
+            snippet = abstract[:500] + "..." if len(abstract) > 500 else abstract
+            author_prefix = ", ".join(author_names)
+            if author_prefix:
+                snippet = f"{author_prefix}. {snippet}" if snippet else author_prefix
+
+            pub_date = work.get("publication_date") or ""
+            if not pub_date and work.get("publication_year"):
+                pub_date = str(work.get("publication_year"))
+
+            results.append({
+                "title": title,
+                "url": url,
+                "snippet": snippet,
+                "published_date": pub_date,
+                "source": "openalex",
+                "doi": doi,
+                "citation_count": work.get("cited_by_count", 0),
+            })
+        return results
+    except Exception as e:
+        print(f"[openalex] error: {e}", file=sys.stderr)
+        return []
+
+
+@_throttled
+def search_semantic_scholar(query: str, api_key: str = None, num: int = 5,
+                            freshness: str = None) -> list:
+    """Semantic Scholar 学术检索。"""
+    try:
+        if not api_key:
+            _semantic_rate_limit()
+
+        params = {
+            "query": query,
+            "limit": min(num, 100),
+            "fields": "title,authors,year,url,abstract,citationCount,venue,externalIds,paperId",
+        }
+        if freshness == "py":
+            year = datetime.now(timezone.utc).year - 1
+            params["year"] = f"{year}-"
+
+        headers = {
+            "User-Agent": "OpenClaw-Search-Layer/1.0",
+            "Accept": "application/json",
+        }
+        if api_key:
+            headers["x-api-key"] = api_key
+
+        r = requests.get(
+            f"https://api.semanticscholar.org/graph/v1/paper/search?{urlencode(params)}",
+            headers=headers,
+            timeout=20,
+        )
+        if r.status_code == 429:
+            if api_key:
+                print("[semantic] rate limited with API key", file=sys.stderr)
+            return []
+        r.raise_for_status()
+        data = r.json()
+
+        results = []
+        for paper in data.get("data", []):
+            title = paper.get("title") or ""
+            ext_ids = paper.get("externalIds") or {}
+            url = paper.get("url") or ""
+            if not url and ext_ids.get("DOI"):
+                url = f"https://doi.org/{ext_ids.get('DOI')}"
+            if not url:
+                continue
+
+            authors = paper.get("authors") or []
+            author_names = [a.get("name", "") for a in authors[:3] if a.get("name")]
+            abstract = paper.get("abstract") or ""
+            snippet = abstract[:500] + "..." if len(abstract) > 500 else abstract
+            author_prefix = ", ".join(author_names)
+            if author_prefix:
+                snippet = f"{author_prefix}. {snippet}" if snippet else author_prefix
+            venue = paper.get("venue") or ""
+            if venue:
+                snippet = f"[{venue}] {snippet}" if snippet else venue
+
+            year = paper.get("year")
+            results.append({
+                "title": title,
+                "url": url,
+                "snippet": snippet,
+                "published_date": str(year) if year else "",
+                "source": "semantic",
+                "semantic_scholar_id": paper.get("paperId", ""),
+                "external_ids": ext_ids,
+                "citation_count": paper.get("citationCount", 0),
+            })
+        return results
+    except Exception as e:
+        print(f"[semantic] error: {e}", file=sys.stderr)
+        return []
+
+
 # ---------------------------------------------------------------------------
 # Dedup
 # ---------------------------------------------------------------------------
@@ -594,7 +763,7 @@ def execute_search(query: str, mode: str, keys: dict, num: int,
         elif has_grok and _want("grok"):
             all_results = search_grok(query, grok_url, grok_key, grok_model, num, freshness)
         else:
-            print('{"warning": "No API keys found for fast mode"}',
+            print('{"warning": "No available source for fast mode (check keys and --source filter)"}',
                   file=sys.stderr)
 
     elif mode == "deep":
@@ -609,6 +778,9 @@ def execute_search(query: str, mode: str, keys: dict, num: int,
             if has_grok and _want("grok"):
                 futures[pool.submit(
                     search_grok, query, grok_url, grok_key, grok_model, num, freshness)] = "grok"
+            if not futures:
+                print('{"warning": "No available source for deep mode (check keys and --source filter)"}',
+                      file=sys.stderr)
             for fut in concurrent.futures.as_completed(futures):
                 name = futures[fut]
                 try:
@@ -623,12 +795,44 @@ def execute_search(query: str, mode: str, keys: dict, num: int,
 
     elif mode == "answer":
         if "tavily" not in keys or not _want("tavily"):
-            print('{"warning": "Tavily API key not found"}', file=sys.stderr)
+            print('{"warning": "Tavily unavailable for answer mode (key missing or filtered)"}',
+                  file=sys.stderr)
         else:
             tav = search_tavily(query, keys["tavily"], num,
                                 include_answer=True, freshness=freshness)
             all_results = tav["results"]
             answer_text = tav.get("answer")
+
+    elif mode == "academic":
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+            futures = {}
+            if _want("openalex"):
+                futures[pool.submit(
+                    search_openalex, query, keys.get("openalex"), num, freshness
+                )] = "openalex"
+            if _want("semantic"):
+                futures[pool.submit(
+                    search_semantic_scholar, query, keys.get("semantic"), num, freshness
+                )] = "semantic"
+            if "tavily" in keys and _want("tavily"):
+                futures[pool.submit(
+                    search_tavily, query, keys["tavily"], num, freshness=freshness
+                )] = "tavily"
+
+            if not futures:
+                print('{"warning": "No available source for academic mode"}', file=sys.stderr)
+
+            for fut in concurrent.futures.as_completed(futures):
+                name = futures[fut]
+                try:
+                    res = fut.result()
+                except Exception as e:
+                    print(f"[{name}] error: {e}", file=sys.stderr)
+                    continue
+                if isinstance(res, dict):
+                    all_results.extend(res.get("results", []))
+                else:
+                    all_results.extend(res)
 
     return all_results, answer_text
 
@@ -687,19 +891,124 @@ def _run_extract_refs(urls: list) -> list:
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+def _parse_source_filter(raw_source: str | None) -> set | None:
+    """解析并校验 source 过滤参数。"""
+    if not raw_source:
+        return None
+    allowed = {"exa", "tavily", "grok", "openalex", "semantic"}
+    parsed = {s.strip().lower() for s in raw_source.split(",") if s.strip()}
+    unknown = sorted(parsed - allowed)
+    if unknown:
+        raise ValueError(
+            f"Unknown sources: {', '.join(unknown)}. Allowed: {', '.join(sorted(allowed))}"
+        )
+    return parsed
+
+
+def export_bibtex(results: list, query: str) -> str:
+    entries = []
+    for r in results:
+        title = (r.get("title") or "").replace("{", "\\{").replace("}", "\\}")
+        url = r.get("url") or ""
+        year = (r.get("published_date") or "")[:4]
+        authors = (r.get("snippet") or "").split(".")[0].replace("{", "\\{").replace("}", "\\}")
+        key_words = [w for w in title.split()[:3] if w]
+        cite_key = re.sub(r"[^a-zA-Z0-9]", "", "".join(w.capitalize() for w in key_words) + year) or "paper"
+        entries.append(
+            f"@article{{{cite_key},\n"
+            f"  title = {{{title}}},\n"
+            f"  author = {{{authors}}},\n"
+            f"  year = {{{year}}},\n"
+            f"  url = {{{url}}}\n"
+            f"}}"
+        )
+    header = f"% BibTeX export for query: {query}\n% Generated by OpenClaw Search Layer\n\n"
+    return header + "\n\n".join(entries)
+
+
+def export_csv(results: list) -> str:
+    import csv
+    import io
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Title", "Authors/Source", "Year", "Citations", "URL", "Source"])
+    for r in results:
+        title = r.get("title", "")
+        authors = (r.get("snippet", "") or "").split(".")[0]
+        year = (r.get("published_date") or "")[:4]
+        citations = r.get("citation_count", "")
+        url = r.get("url", "")
+        source = r.get("source", "")
+        writer.writerow([title, authors, year, citations, url, source])
+    return output.getvalue()
+
+
+def export_markdown(results: list, query: str) -> str:
+    lines = [
+        f"# 学术检索结果: {query}",
+        "",
+        f"**结果数**: {len(results)}",
+        "",
+        "---",
+        "",
+    ]
+    for i, r in enumerate(results, 1):
+        title = r.get("title", "")
+        url = r.get("url", "")
+        year = (r.get("published_date") or "")[:4] if r.get("published_date") else "N/A"
+        citations = r.get("citation_count", "N/A")
+        source = r.get("source", "")
+        lines.extend([
+            f"## {i}. {title}",
+            "",
+            f"- **年份**: {year}",
+            f"- **引用**: {citations}",
+            f"- **来源**: {source}",
+            f"- **链接**: [{url}]({url})",
+            "",
+        ])
+    return "\n".join(lines)
+
+
+def export_citations(results: list) -> str:
+    lines = []
+    for r in results:
+        title = r.get("title", "")
+        authors = (r.get("snippet", "") or "").split(".")[0]
+        year = (r.get("published_date") or "")[:4]
+        url = r.get("url", "")
+        lines.append(f"{authors}. ({year}). {title}. {url}")
+    return "\n".join(lines)
+
+
+def export_results(results: list, query: str, fmt: str = "json") -> str | None:
+    if fmt in ("json", None):
+        return None
+    if fmt == "bibtex":
+        return export_bibtex(results, query)
+    if fmt == "csv":
+        return export_csv(results)
+    if fmt == "markdown":
+        return export_markdown(results, query)
+    if fmt == "citations":
+        return export_citations(results)
+    return None
+
+
 def main():
     ap = argparse.ArgumentParser(
-        description="Multi-source search v2 (Exa + Tavily) with intent-aware scoring")
+        description="Multi-source search v3.1 with intent-aware scoring")
     ap.add_argument("query", nargs="?", default=None, help="Search query (single)")
     ap.add_argument("--queries", nargs="+", default=None,
                     help="Multiple queries to execute in parallel")
-    ap.add_argument("--mode", choices=["fast", "deep", "answer"], default="deep",
-                    help="fast=Exa only | deep=Exa+Tavily | answer=Tavily with AI answer")
+    ap.add_argument("--mode", choices=["fast", "deep", "answer", "academic"], default="deep",
+                    help="fast=Exa only | deep=Exa+Tavily+Grok | answer=Tavily | academic=OpenAlex+Semantic+Tavily")
     ap.add_argument("--num", type=int, default=5,
                     help="Results per source per query (default 5)")
     ap.add_argument("--intent",
                     choices=["factual", "status", "comparison", "tutorial",
-                             "exploratory", "news", "resource"],
+                             "exploratory", "news", "resource", "academic"],
                     default=None,
                     help="Query intent type for scoring (default: no intent scoring)")
     ap.add_argument("--freshness", choices=["pd", "pw", "pm", "py"], default=None,
@@ -707,7 +1016,10 @@ def main():
     ap.add_argument("--domain-boost", default=None,
                     help="Comma-separated domains to boost in scoring")
     ap.add_argument("--source", default=None,
-                    help="Comma-separated sources to use (exa,tavily,grok). Default: all available")
+                    help="Comma-separated sources to use (exa,tavily,grok,openalex,semantic)")
+    ap.add_argument("--export", choices=["json", "bibtex", "csv", "markdown", "citations"],
+                    default=None,
+                    help="Export format for results (default json)")
     ap.add_argument("--extract-refs", action="store_true",
                     help="After search, fetch each result URL and extract structured references")
     ap.add_argument("--extract-refs-urls", nargs="+", default=None,
@@ -739,9 +1051,11 @@ def main():
     boost_domains = set()
     if args.domain_boost:
         boost_domains = {d.strip() for d in args.domain_boost.split(",")}
-    source_filter = None
-    if args.source:
-        source_filter = {s.strip() for s in args.source.split(",")}
+    try:
+        source_filter = _parse_source_filter(args.source)
+    except ValueError as e:
+        print(f'{{"error":"{str(e)}"}}', file=sys.stderr)
+        sys.exit(2)
 
     # Execute all queries (parallel if multiple)
     all_results = []
@@ -781,6 +1095,16 @@ def main():
             r["score"] = score_result(r, primary_query, args.intent, boost_domains)
         deduped.sort(key=lambda x: x.get("score", 0), reverse=True)
 
+    # 学术意图附加便捷链接字段
+    if args.intent == "academic":
+        for r in deduped:
+            title = r.get("title", "Paper")
+            url = r.get("url", "")
+            if url:
+                r["link"] = f"[{title}]({url})"
+                r["link_markdown"] = f"[🔗 {title}]({url})"
+                r["link_text"] = url
+
     # Build output
     output = {
         "mode": args.mode,
@@ -799,6 +1123,14 @@ def main():
         output["refs"] = _run_extract_refs(
             urls=args.extract_refs_urls or [r["url"] for r in deduped],
         )
+
+    export_format = getattr(args, "export", None)
+    if export_format and export_format != "json":
+        primary_query = queries[0] if queries else ""
+        exported = export_results(deduped, primary_query, export_format)
+        if exported is not None:
+            print(exported)
+            return
 
     print(json.dumps(output, ensure_ascii=False, indent=2))
 

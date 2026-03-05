@@ -12,7 +12,7 @@
 
 | Skill | 干什么的 |
 |-------|---------| 
-| **[search-layer](./search-layer/)** | 四源并行搜索（Brave + Exa + Tavily + Grok）+ 意图感知评分 + 自动去重 + 链式引用追踪。Brave 由 OpenClaw 内置的 `web_search` 提供，Grok 通过 Completions API 调用。 |
+| **[search-layer](./search-layer/)** | 四源并行搜索（Brave + Exa + Tavily + Grok）+ 学术检索模式（OpenAlex + Semantic + Tavily）+ 意图感知评分 + 自动去重 + 链式引用追踪。Brave 由 OpenClaw 内置的 `web_search` 提供。 |
 | **[content-extract](./content-extract/)** | URL → 干净的 Markdown。遇到反爬站点（微信、知乎）自动降级到 MinerU 解析。 |
 | **[mineru-extract](./mineru-extract/)** | [MinerU](https://mineru.net) 官方 API 的封装层。把 PDF、Office 文档、HTML 页面转成 Markdown。 |
 
@@ -28,7 +28,28 @@ github-explorer（独立 repo）
 
 ---
 
-## search-layer v3.0 新特性（最新）
+## search-layer v3.1 新特性（最新）
+
+v3.1 在 v3.0 深度链式追踪基础上，新增 **Academic 学术检索模式** 与 **导出能力**。
+
+### Academic 模式（v3.1）
+
+- 新增 `--mode academic`：并行使用 `OpenAlex + Semantic Scholar + Tavily`
+- 新增 `--intent academic`：评分权重偏向权威性（authority 最高）
+- 新增 `--export`：支持 `bibtex` / `csv` / `markdown` / `citations`
+- `--source` 扩展支持 `openalex,semantic`（原有 `exa,tavily,grok` 仍可用）
+
+```bash
+# 学术检索
+python3 search-layer/scripts/search.py "transformer architecture" \
+  --mode academic --intent academic --num 5
+
+# 导出 BibTeX
+python3 search-layer/scripts/search.py "transformer architecture" \
+  --mode academic --intent academic --export bibtex
+```
+
+---
 
 v3.0 在四源并行搜索的基础上新增了**深度链式追踪**能力，让 agent 能够顺藤摸瓜、追踪信息的完整引用链。
 
@@ -188,11 +209,13 @@ ln -s ~/.openclaw/workspace/_repos/openclaw-search-skills/mineru-extract mineru-
     "apiUrl": "https://api.x.ai/v1",
     "apiKey": "your-grok-key",
     "model": "grok-4.1-fast"
-  }
+  },
+  "openalex": "your-openalex-key-optional",
+  "semantic": "your-semantic-scholar-key-optional"
 }
 ```
 
-> 💡 Grok 配置可选。缺失时自动降级为 Exa + Tavily 双源。
+> 💡 `openalex` 和 `semantic` 为可选字段；未配置时 `academic` 模式会自动降级为可用源组合。
 
 **方式二：环境变量（兼容）**
 
@@ -202,6 +225,8 @@ export TAVILY_API_KEY="your-tavily-key"  # https://tavily.com
 export GROK_API_URL="https://api.x.ai/v1"  # 可选
 export GROK_API_KEY="your-grok-key"      # 可选
 export GROK_MODEL="grok-4.1-fast"        # 可选，默认 grok-4.1-fast
+export OPENALEX_API_KEY="your-openalex-key"      # 可选
+export SEMANTIC_API_KEY="your-semantic-key"      # 可选
 ```
 
 环境变量会覆盖 credentials 文件中的同名配置。
@@ -252,11 +277,17 @@ python3 search-layer/scripts/search.py "OpenAI latest news" --mode deep --source
 
 # 搜索 + 链式追踪（v3.0）
 python3 search-layer/scripts/search.py "OpenClaw config bug" --mode deep --intent status --extract-refs
+
+# 学术检索（v3.1）
+python3 search-layer/scripts/search.py "transformer architecture" --mode academic --intent academic --num 5
+
+# 学术导出（v3.1）
+python3 search-layer/scripts/search.py "transformer architecture" --mode academic --intent academic --export bibtex
 ```
 
-模式：`fast`（Exa 优先）、`deep`（Exa + Tavily + Grok 并行）、`answer`（Tavily 带 AI 摘要）
+模式：`fast`（Exa 优先）、`deep`（Exa + Tavily + Grok 并行）、`answer`（Tavily 带 AI 摘要）、`academic`（OpenAlex + Semantic + Tavily）
 
-意图：`factual`、`status`、`comparison`、`tutorial`、`exploratory`、`news`、`resource`
+意图：`factual`、`status`、`comparison`、`tutorial`、`exploratory`、`news`、`resource`、`academic`
 
 ### fetch_thread.py（v3.0 新增）
 
@@ -293,7 +324,7 @@ python3 mineru-extract/scripts/mineru_extract.py "https://example.com/paper.pdf"
 - Python 3.10+
 - `requests`（基础依赖）
 - `trafilatura`、`beautifulsoup4`、`lxml`（v3.0 链式追踪依赖）
-- API Keys：Exa 和/或 Tavily（search-layer），Grok API（可选，第四搜索源），MinerU token（可选，content-extract）
+- API Keys：Exa/Tavily（search-layer 基础），Grok（可选），OpenAlex/Semantic Scholar（academic 模式可选），MinerU token（content-extract 可选）
 
 ## License
 
