@@ -88,6 +88,268 @@ INTENT_WEIGHTS = {
     "academic":    {"keyword": 0.3, "freshness": 0.2, "authority": 0.7},
 }
 
+_SOURCE_ALIASES = {
+    "semantic": "semantic_scholar",
+    "semantic_scholar": "semantic_scholar",
+}
+
+_AREA_KEYWORDS = {
+    "nlp": [
+        "nlp", "language model", "llm", "prompt", "text generation", "bert", "gpt",
+        "machine translation", "summarization", "question answering", "acl", "emnlp",
+    ],
+    "cv": [
+        "computer vision", "vision transformer", "cvpr", "iccv", "eccv", "object detection",
+        "segmentation", "image classification", "image", "vision", "diffusion model", "gan",
+    ],
+    "ml": [
+        "machine learning", "deep learning", "representation learning", "reinforcement learning",
+        "neurips", "icml", "iclr", "optimization", "meta-learning",
+    ],
+    "systems": [
+        "systems", "distributed", "operating system", "storage", "networking",
+        "osdi", "sosp", "nsdi", "usenix atc", "throughput", "latency",
+    ],
+    "security": [
+        "security", "privacy", "cryptography", "vulnerability", "threat model",
+        "ieee s&p", "oakland", "ccs", "ndss", "usenix security",
+    ],
+    "database": [
+        "database", "dbms", "query optimizer", "indexing", "transaction",
+        "sigmod", "vldb", "icde", "data management",
+    ],
+    "software_engineering": [
+        "software engineering", "program analysis", "testing", "debugging",
+        "icse", "fse", "ase", "code generation", "code intelligence",
+    ],
+}
+
+_VENUE_KEYWORDS = {
+    # A-tier
+    "neurips": 1.0,
+    "nips": 1.0,
+    "icml": 1.0,
+    "iclr": 1.0,
+    "cvpr": 1.0,
+    "iccv": 1.0,
+    "eccv": 1.0,
+    "acl": 1.0,
+    "emnlp": 1.0,
+    "naacl": 1.0,
+    "osdi": 1.0,
+    "sosp": 1.0,
+    "nsdi": 1.0,
+    "usenix security": 1.0,
+    "ieee symposium on security and privacy": 1.0,
+    "oakland": 1.0,
+    "sigmod": 1.0,
+    "vldb": 1.0,
+    "icse": 1.0,
+    "fse": 1.0,
+    # B-tier
+    "aaai": 0.85,
+    "ijcai": 0.85,
+    "coling": 0.85,
+    "eacl": 0.85,
+    "acm mm": 0.85,
+    "kdd": 0.9,
+    "the web conference": 0.85,
+    "usenix atc": 0.85,
+    "euro sys": 0.85,
+    "eurosys": 0.85,
+    "middleware": 0.8,
+    "ccs": 0.9,
+    "ndss": 0.9,
+    "icde": 0.85,
+    "pods": 0.8,
+    "ase": 0.85,
+    "issta": 0.8,
+    "icsme": 0.75,
+    "workshop": 0.65,
+}
+
+
+def normalize_doi(doi: str | None) -> str:
+    if not doi:
+        return ""
+    normalized = doi.strip()
+    normalized = re.sub(r"^https?://(dx\.)?doi\.org/", "", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"^doi:\s*", "", normalized, flags=re.IGNORECASE)
+    normalized = normalized.strip().lower()
+    if normalized.startswith("10."):
+        return normalized
+    return ""
+
+
+def extract_arxiv_id(*texts: str) -> str:
+    patterns = [
+        r"arxiv\.org/(?:abs|pdf)/([0-9]{4}\.[0-9]{4,5}(?:v\d+)?)",
+        r"arxiv\.org/(?:abs|pdf)/([a-z\-]+/[0-9]{7}(?:v\d+)?)",
+        r"\barxiv:\s*([0-9]{4}\.[0-9]{4,5}(?:v\d+)?)",
+    ]
+    for text in texts:
+        if not text:
+            continue
+        candidate = str(text)
+        for pattern in patterns:
+            match = re.search(pattern, candidate, flags=re.IGNORECASE)
+            if match:
+                arxiv_id = match.group(1).lower()
+                return re.sub(r"v\d+$", "", arxiv_id)
+    return ""
+
+
+def decode_openalex_abstract(abstract_inverted_index: dict | None) -> str:
+    if not isinstance(abstract_inverted_index, dict):
+        return ""
+    token_positions = []
+    for token, positions in abstract_inverted_index.items():
+        if not isinstance(positions, list):
+            continue
+        for pos in positions:
+            if isinstance(pos, int):
+                token_positions.append((pos, token))
+    if not token_positions:
+        return ""
+    token_positions.sort(key=lambda item: item[0])
+    return " ".join(token for _, token in token_positions)
+
+
+def normalize_source_name(source: str) -> str:
+    lowered = (source or "").strip().lower()
+    return _SOURCE_ALIASES.get(lowered, lowered)
+
+
+def normalize_authors(authors) -> list:
+    if not authors:
+        return []
+    if isinstance(authors, list):
+        return [str(a).strip() for a in authors if str(a).strip()]
+    if isinstance(authors, str):
+        parts = re.split(r",|;|\band\b", authors)
+        return [p.strip() for p in parts if p.strip()]
+    return []
+
+
+def get_venue_score(result: dict) -> float:
+    venue_text = " ".join([
+        str(result.get("venue", "")),
+        str(result.get("title", "")),
+        str(result.get("snippet", "")),
+        str(result.get("url", "")),
+    ]).lower()
+    best = 0.35
+    for keyword, score in _VENUE_KEYWORDS.items():
+        if len(keyword) <= 2:
+            continue
+        if " " in keyword:
+            matched = keyword in venue_text
+        else:
+            matched = re.search(rf"\b{re.escape(keyword)}\b", venue_text) is not None
+        if matched:
+            best = max(best, score)
+    source = normalize_source_name(result.get("source", ""))
+    if source in {"openalex", "semantic_scholar"}:
+        best = max(best, 0.8)
+    elif source == "tavily":
+        # 普通网页在 academic 排序中不应压过高质量论文源
+        best = min(best, 0.2)
+    return min(1.0, best)
+
+
+def get_artifact_score(result: dict) -> float:
+    text = " ".join([
+        str(result.get("title", "")),
+        str(result.get("snippet", "")),
+        str(result.get("url", "")),
+    ]).lower()
+    score = 0.2
+    if any(d in text for d in ("github.com", "paperswithcode.com", "huggingface.co")):
+        score = max(score, 0.9)
+    if any(k in text for k in ("code", "repo", "repository", "benchmark", "dataset", "implementation")):
+        score = max(score, 0.6)
+    if "artifact" in text:
+        score = max(score, 0.7)
+    return min(1.0, score)
+
+
+def classify_area(query: str, result: dict) -> str:
+    text = " ".join([
+        query or "",
+        str(result.get("title", "")),
+        str(result.get("snippet", "")),
+        str(result.get("venue", "")),
+    ]).lower()
+    area_scores = {}
+    for area, keywords in _AREA_KEYWORDS.items():
+        area_scores[area] = sum(1 for k in keywords if k in text)
+    best_area = max(area_scores, key=area_scores.get)
+    if area_scores.get(best_area, 0) > 0:
+        return best_area
+    return "general_cs"
+
+
+def build_paper_identity(result: dict) -> tuple[str, str]:
+    doi = normalize_doi(result.get("doi"))
+    if doi:
+        return "doi", doi
+    arxiv_id = result.get("arxiv_id") or ""
+    if arxiv_id:
+        return "arxiv_id", arxiv_id
+    semantic_id = result.get("semantic_scholar_id") or ""
+    if semantic_id:
+        return "semantic_scholar_id", str(semantic_id)
+    return "url", normalize_url(result.get("url", ""))
+
+
+def is_academic_source(result: dict) -> bool:
+    source = normalize_source_name(result.get("source", ""))
+    return source in {"openalex", "semantic_scholar"}
+
+
+def enrich_academic_result(result: dict, query: str = "") -> dict:
+    enriched = dict(result)
+    enriched["source"] = normalize_source_name(enriched.get("source", ""))
+
+    enriched["doi"] = normalize_doi(enriched.get("doi"))
+
+    external_ids = enriched.get("external_ids") or {}
+    if isinstance(external_ids, dict):
+        if not enriched["doi"]:
+            enriched["doi"] = normalize_doi(external_ids.get("DOI"))
+        arxiv_from_external = external_ids.get("ArXiv") or external_ids.get("ARXIV") or ""
+    else:
+        arxiv_from_external = ""
+        external_ids = {}
+    enriched["external_ids"] = external_ids
+
+    enriched["arxiv_id"] = extract_arxiv_id(
+        enriched.get("url", ""),
+        enriched.get("doi", ""),
+        arxiv_from_external,
+    )
+
+    enriched["authors"] = normalize_authors(enriched.get("authors"))
+    if not enriched["authors"]:
+        snippet = enriched.get("snippet", "")
+        candidate = snippet.split(".")[0] if snippet else ""
+        enriched["authors"] = normalize_authors(candidate)
+
+    venue = str(enriched.get("venue") or "").strip()
+    if not venue:
+        match = re.search(r"\[([^\]]+)\]", str(enriched.get("snippet", "")))
+        if match:
+            venue = match.group(1).strip()
+    enriched["venue"] = venue
+
+    paper_id_type, paper_id = build_paper_identity(enriched)
+    enriched["paper_id_type"] = paper_id_type
+    enriched["paper_id"] = paper_id
+    enriched["area"] = classify_area(query, enriched)
+    enriched["artifact_score"] = get_artifact_score(enriched)
+    enriched["venue_score"] = get_venue_score(enriched)
+    return enriched
+
 # ---------------------------------------------------------------------------
 # Authority domains (loaded from JSON, with fallback built-in)
 # ---------------------------------------------------------------------------
@@ -302,7 +564,7 @@ def get_keys():
                     keys["grok_model"] = grok.get("model", "grok-4.1-fast")
             if v := cred.get("openalex"):
                 keys["openalex"] = v
-            if v := cred.get("semantic"):
+            if v := cred.get("semantic") or cred.get("semantic_scholar"):
                 keys["semantic"] = v
         except (json.JSONDecodeError, FileNotFoundError):
             pass
@@ -320,6 +582,8 @@ def get_keys():
     if v := os.environ.get("OPENALEX_API_KEY"):
         keys["openalex"] = v
     if v := os.environ.get("SEMANTIC_API_KEY"):
+        keys["semantic"] = v
+    if v := os.environ.get("SEMANTIC_SCHOLAR_API_KEY"):
         keys["semantic"] = v
     return keys
 
@@ -605,7 +869,7 @@ def search_openalex(query: str, api_key: str = None, num: int = 5,
             title = work.get("display_name") or work.get("title") or ""
             primary_loc = work.get("primary_location") or {}
             url = primary_loc.get("landing_page_url") or primary_loc.get("url") or ""
-            doi = work.get("doi") or ""
+            doi = normalize_doi(work.get("doi"))
             if not url and doi:
                 url = f"https://doi.org/{doi}"
             if not url:
@@ -617,7 +881,11 @@ def search_openalex(query: str, api_key: str = None, num: int = 5,
                 for a in authorships[:3]
                 if a.get("author", {}).get("display_name")
             ]
-            abstract = work.get("abstract") or ""
+            abstract = (
+                decode_openalex_abstract(work.get("abstract_inverted_index"))
+                or work.get("abstract")
+                or ""
+            )
             snippet = abstract[:500] + "..." if len(abstract) > 500 else abstract
             author_prefix = ", ".join(author_names)
             if author_prefix:
@@ -627,6 +895,9 @@ def search_openalex(query: str, api_key: str = None, num: int = 5,
             if not pub_date and work.get("publication_year"):
                 pub_date = str(work.get("publication_year"))
 
+            source_host = primary_loc.get("source") or {}
+            venue = source_host.get("display_name") or ""
+
             results.append({
                 "title": title,
                 "url": url,
@@ -634,6 +905,9 @@ def search_openalex(query: str, api_key: str = None, num: int = 5,
                 "published_date": pub_date,
                 "source": "openalex",
                 "doi": doi,
+                "authors": author_names,
+                "venue": venue,
+                "openalex_id": work.get("id", ""),
                 "citation_count": work.get("cited_by_count", 0),
             })
         return results
@@ -683,8 +957,9 @@ def search_semantic_scholar(query: str, api_key: str = None, num: int = 5,
             title = paper.get("title") or ""
             ext_ids = paper.get("externalIds") or {}
             url = paper.get("url") or ""
-            if not url and ext_ids.get("DOI"):
-                url = f"https://doi.org/{ext_ids.get('DOI')}"
+            doi = normalize_doi(ext_ids.get("DOI"))
+            if not url and doi:
+                url = f"https://doi.org/{doi}"
             if not url:
                 continue
 
@@ -705,9 +980,13 @@ def search_semantic_scholar(query: str, api_key: str = None, num: int = 5,
                 "url": url,
                 "snippet": snippet,
                 "published_date": str(year) if year else "",
-                "source": "semantic",
+                "source": "semantic_scholar",
                 "semantic_scholar_id": paper.get("paperId", ""),
                 "external_ids": ext_ids,
+                "doi": doi,
+                "arxiv_id": extract_arxiv_id(ext_ids.get("ArXiv", "")),
+                "authors": author_names,
+                "venue": venue,
                 "citation_count": paper.get("citationCount", 0),
             })
         return results
@@ -719,19 +998,72 @@ def search_semantic_scholar(query: str, api_key: str = None, num: int = 5,
 # ---------------------------------------------------------------------------
 # Dedup
 # ---------------------------------------------------------------------------
-def dedup(results: list) -> list:
+def _merge_sources(existing_source: str, new_source: str) -> str:
+    existing = [s.strip() for s in str(existing_source).split(",") if s.strip()]
+    if new_source and new_source not in existing:
+        existing.append(new_source)
+    return ", ".join(existing)
+
+
+def merge_result(existing: dict, incoming: dict) -> dict:
+    merged = dict(existing)
+    merged["source"] = _merge_sources(existing.get("source", ""), incoming.get("source", ""))
+
+    # 优先保留更完整字段
+    for key in (
+        "title", "snippet", "published_date", "venue", "doi", "arxiv_id",
+        "paper_id", "paper_id_type", "area", "semantic_scholar_id", "openalex_id",
+    ):
+        if (not merged.get(key)) and incoming.get(key):
+            merged[key] = incoming[key]
+
+    # 引用数和分数字段取更大值
+    for numeric_key in ("citation_count", "artifact_score", "venue_score"):
+        merged[numeric_key] = max(float(merged.get(numeric_key, 0) or 0), float(incoming.get(numeric_key, 0) or 0))
+        if numeric_key == "citation_count":
+            merged[numeric_key] = int(merged[numeric_key])
+
+    # 作者去重合并
+    authors = []
+    for author in normalize_authors(merged.get("authors")) + normalize_authors(incoming.get("authors")):
+        if author not in authors:
+            authors.append(author)
+    if authors:
+        merged["authors"] = authors
+
+    # external_ids 合并
+    external_ids = {}
+    if isinstance(merged.get("external_ids"), dict):
+        external_ids.update(merged.get("external_ids"))
+    if isinstance(incoming.get("external_ids"), dict):
+        external_ids.update(incoming.get("external_ids"))
+    if external_ids:
+        merged["external_ids"] = external_ids
+
+    # URL 选择：优先保留非 DOI 落地页
+    incoming_url = incoming.get("url", "")
+    if merged.get("url", "").startswith("https://doi.org/") and incoming_url and not incoming_url.startswith("https://doi.org/"):
+        merged["url"] = incoming_url
+
+    return merged
+
+
+def dedup(results: list, prefer_paper_identity: bool = False) -> list:
     seen = {}
     out = []
     for r in results:
-        key = normalize_url(r["url"])
+        if prefer_paper_identity:
+            paper_id = r.get("paper_id", "")
+            key = f"paper:{paper_id}" if paper_id else f"url:{normalize_url(r.get('url', ''))}"
+        else:
+            key = normalize_url(r.get("url", ""))
         if key not in seen:
             seen[key] = r
             out.append(r)
         else:
-            existing = seen[key]
-            src = existing["source"]
-            if r["source"] not in src:
-                existing["source"] = f"{src}, {r['source']}"
+            merged = merge_result(seen[key], r)
+            seen[key].clear()
+            seen[key].update(merged)
     return out
 
 
@@ -810,10 +1142,10 @@ def execute_search(query: str, mode: str, keys: dict, num: int,
                 futures[pool.submit(
                     search_openalex, query, keys.get("openalex"), num, freshness
                 )] = "openalex"
-            if _want("semantic"):
+            if _want("semantic_scholar"):
                 futures[pool.submit(
                     search_semantic_scholar, query, keys.get("semantic"), num, freshness
-                )] = "semantic"
+                )] = "semantic_scholar"
             if "tavily" in keys and _want("tavily"):
                 futures[pool.submit(
                     search_tavily, query, keys["tavily"], num, freshness=freshness
@@ -895,12 +1227,13 @@ def _parse_source_filter(raw_source: str | None) -> set | None:
     """解析并校验 source 过滤参数。"""
     if not raw_source:
         return None
-    allowed = {"exa", "tavily", "grok", "openalex", "semantic"}
-    parsed = {s.strip().lower() for s in raw_source.split(",") if s.strip()}
+    allowed = {"exa", "tavily", "grok", "openalex", "semantic_scholar"}
+    parsed_raw = {s.strip().lower() for s in raw_source.split(",") if s.strip()}
+    parsed = {normalize_source_name(s) for s in parsed_raw}
     unknown = sorted(parsed - allowed)
     if unknown:
         raise ValueError(
-            f"Unknown sources: {', '.join(unknown)}. Allowed: {', '.join(sorted(allowed))}"
+            f"Unknown sources: {', '.join(unknown)}. Allowed: exa,grok,openalex,semantic_scholar,tavily (alias: semantic)"
         )
     return parsed
 
@@ -1016,7 +1349,7 @@ def main():
     ap.add_argument("--domain-boost", default=None,
                     help="Comma-separated domains to boost in scoring")
     ap.add_argument("--source", default=None,
-                    help="Comma-separated sources to use (exa,tavily,grok,openalex,semantic)")
+                    help="Comma-separated sources to use (exa,tavily,grok,openalex,semantic_scholar; alias semantic)")
     ap.add_argument("--export", choices=["json", "bibtex", "csv", "markdown", "citations"],
                     default=None,
                     help="Export format for results (default json)")
@@ -1085,8 +1418,14 @@ def main():
                 if ans and not answer_text:
                     answer_text = ans
 
+    # 学术模式下先做结构化标准化，再按论文主键去重
+    prefer_paper_identity = args.mode == "academic" or args.intent == "academic"
+    if prefer_paper_identity:
+        primary_query = queries[0] if queries else ""
+        all_results = [enrich_academic_result(r, primary_query) for r in all_results]
+
     # Dedup
-    deduped = dedup(all_results)
+    deduped = dedup(all_results, prefer_paper_identity=prefer_paper_identity)
 
     # Score and sort if intent is specified
     if args.intent:
