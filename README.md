@@ -37,7 +37,7 @@ v3.1 在 v3.0 深度链式追踪基础上，新增 **Academic 学术检索模式
 - 新增 `--mode academic`：并行使用 `OpenAlex + Semantic Scholar + Tavily`
 - 新增 `--intent academic`：评分权重偏向权威性（authority 最高）
 - 新增 `--export`：支持 `bibtex` / `csv` / `markdown` / `citations`
-- `--source` 扩展支持 `openalex,semantic`（原有 `exa,tavily,grok` 仍可用）
+- `--source` 扩展支持 `openalex,semantic_scholar`（兼容别名 `semantic`）
 
 ```bash
 # 学术检索
@@ -155,7 +155,7 @@ v2.1 新增 **Grok (xAI)** 作为第四搜索源，通过 Completions API 调用
 
 v2 借鉴了 [Anthropic knowledge-work-plugins](https://github.com/anthropics/knowledge-work-plugins) 的 enterprise-search 设计，新增：
 
-- **意图分类**：7 种查询意图（factual / status / comparison / tutorial / exploratory / news / resource），自动调整搜索策略和评分权重
+- **意图分类**：支持 8 种查询意图（新增 `academic`），自动调整搜索策略和评分权重
 - **多查询并行**：`--queries "q1" "q2" "q3"` 同时执行多个子查询
 - **意图感知评分**：`score = w_keyword × keyword_match + w_freshness × freshness_score + w_authority × authority_score`，权重由意图类型决定
 - **域名权威性评分**：内置四级域名评分表（60+ 域名 + 模式匹配规则）
@@ -211,11 +211,12 @@ ln -s ~/.openclaw/workspace/_repos/openclaw-search-skills/mineru-extract mineru-
     "model": "grok-4.1-fast"
   },
   "openalex": "your-openalex-key-optional",
-  "semantic": "your-semantic-scholar-key-optional"
+  "semantic": "your-semantic-scholar-key-optional",
+  "semantic_scholar": "your-semantic-scholar-key-optional"
 }
 ```
 
-> 💡 `openalex` 和 `semantic` 为可选字段；未配置时 `academic` 模式会自动降级为可用源组合。
+> 💡 `openalex` 与 `semantic(_scholar)` 为可选字段；未配置时 `academic` 模式会自动降级为可用源组合。
 
 **方式二：环境变量（兼容）**
 
@@ -227,6 +228,7 @@ export GROK_API_KEY="your-grok-key"      # 可选
 export GROK_MODEL="grok-4.1-fast"        # 可选，默认 grok-4.1-fast
 export OPENALEX_API_KEY="your-openalex-key"      # 可选
 export SEMANTIC_API_KEY="your-semantic-key"      # 可选
+export SEMANTIC_SCHOLAR_API_KEY="your-semantic-key"  # 可选，等价别名
 ```
 
 环境变量会覆盖 credentials 文件中的同名配置。

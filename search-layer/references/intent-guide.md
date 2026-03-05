@@ -162,12 +162,12 @@ keyword_match: 0.5, freshness: 0.1, authority: 0.4
 - Mode: `academic`
 - Freshness: `py`（过去一年，可按主题调整）
 - 查询扩展: 加 `paper`、`research`、`study`、`publication`，并生成英文变体
-- Domain boost: `arxiv.org,nature.com,science.org,cell.com,ieeexplore.ieee.org,pubmed.ncbi.nlm.nih.gov`
+- Domain boost（CS）: `arxiv.org,openreview.net,openaccess.thecvf.com,ieeexplore.ieee.org,dl.acm.org,dblp.org,usenix.org,aaai.org,ijcai.org`
 - 结果偏好: 顶会/期刊 > 预印本 > 技术博客
 
 **权重配置**：`--intent academic`
 ```
-keyword_match: 0.3, freshness: 0.2, authority: 0.7
+authority: 0.30, venue: 0.30, keyword_match: 0.20, freshness: 0.10, artifact: 0.10
 ```
 
 ## 意图判断流程

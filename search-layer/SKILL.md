@@ -96,7 +96,7 @@ python3 /home/node/.openclaw/workspace/skills/search-layer/scripts/search.py \
 | `--intent` | 意图类型，影响评分 |
 | `--freshness` | `pd` / `pw` / `pm` / `py` |
 | `--domain-boost` | 域名加权（+0.2） |
-| `--source` | 限定来源：`exa,tavily,grok,openalex,semantic` |
+| `--source` | 限定来源：`exa,tavily,grok,openalex,semantic_scholar`（兼容别名 `semantic`） |
 | `--num` | 每源结果数 |
 | `--export` | `json/bibtex/csv/markdown/citations` |
 
@@ -132,8 +132,14 @@ python3 search.py --extract-refs-urls \
 score = w_keyword × keyword_match + w_freshness × freshness_score + w_authority × authority_score
 ```
 
+Academic intent 使用质量优先固定公式：
+
+```
+score = 0.30*authority + 0.30*venue + 0.20*keyword + 0.10*freshness + 0.10*artifact
+```
+
 推荐 domain boost：
-- Academic：`arxiv.org,nature.com,science.org,cell.com,ieeexplore.ieee.org,pubmed.ncbi.nlm.nih.gov`
+- Academic（CS）：`arxiv.org,openreview.net,openaccess.thecvf.com,ieeexplore.ieee.org,dl.acm.org,dblp.org,usenix.org,aaai.org,ijcai.org`
 - Tutorial：`dev.to,freecodecamp.org,realpython.com,baeldung.com`
 - Resource：`github.com`
 
@@ -153,8 +159,8 @@ score = w_keyword × keyword_match + w_freshness × freshness_score + w_authorit
 - Exa 失败 → 继续 Tavily/Grok（deep）
 - Tavily 失败 → 继续 Exa/Grok（deep）
 - Grok 失败 → 继续 Exa/Tavily（deep）
-- OpenAlex 失败 → 继续 Semantic/Tavily（academic）
-- Semantic 失败 → 继续 OpenAlex/Tavily（academic）
+- OpenAlex 失败 → 继续 semantic_scholar/Tavily（academic）
+- semantic_scholar 失败 → 继续 OpenAlex/Tavily（academic）
 - search.py 失败 → 回退 Brave `web_search`
 - 任何单源失败都不得阻塞主流程
 
