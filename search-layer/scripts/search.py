@@ -507,8 +507,6 @@ def get_keyword_score(result: dict, query: str) -> float:
 # ---------------------------------------------------------------------------
 def score_result(result: dict, query: str, intent: str, boost_domains: set) -> float:
     """Compute composite score for a result based on intent weights."""
-    weights = INTENT_WEIGHTS.get(intent, INTENT_WEIGHTS["exploratory"])
-
     kw = get_keyword_score(result, query)
     fr = get_freshness_score(result)
     au = get_authority_score(result.get("url", ""))
@@ -524,9 +522,21 @@ def score_result(result: dict, query: str, intent: str, boost_domains: set) -> f
         except Exception:
             pass
 
-    score = (weights["keyword"] * kw +
-             weights["freshness"] * fr +
-             weights["authority"] * au)
+    if intent == "academic":
+        venue = get_venue_score(result)
+        artifact = get_artifact_score(result)
+        score = (
+            0.30 * au +
+            0.30 * venue +
+            0.20 * kw +
+            0.10 * fr +
+            0.10 * artifact
+        )
+    else:
+        weights = INTENT_WEIGHTS.get(intent, INTENT_WEIGHTS["exploratory"])
+        score = (weights["keyword"] * kw +
+                 weights["freshness"] * fr +
+                 weights["authority"] * au)
     return round(score, 4)
 
 
@@ -1432,7 +1442,18 @@ def main():
         primary_query = queries[0]  # Use first query for keyword scoring
         for r in deduped:
             r["score"] = score_result(r, primary_query, args.intent, boost_domains)
-        deduped.sort(key=lambda x: x.get("score", 0), reverse=True)
+            if args.intent == "academic":
+                # 明确输出质量评分要素，便于外部审计与调参
+                r["venue_score"] = round(get_venue_score(r), 4)
+                r["artifact_score"] = round(get_artifact_score(r), 4)
+                r["area"] = r.get("area") or classify_area(primary_query, r)
+        if args.intent == "academic":
+            deduped.sort(
+                key=lambda x: (1 if is_academic_source(x) else 0, x.get("score", 0)),
+                reverse=True,
+            )
+        else:
+            deduped.sort(key=lambda x: x.get("score", 0), reverse=True)
 
     # 学术意图附加便捷链接字段
     if args.intent == "academic":
