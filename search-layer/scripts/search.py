@@ -662,9 +662,11 @@ def _detect_research_profile(query: str, queries: list[str], mode: str,
                              intent: str | None) -> str | None:
     """Detect whether this search should escalate into research-light.
 
-    P1 only enables research-light (Exa deep) for a narrow set of complex
-    exploratory/comparison/status/news queries. This is intentionally internal
-    and conservative to preserve v2 defaults.
+    P1.5 keeps research-light conservative and intent-aware:
+    - comparison: explicit compare language or multi-query bundle is enough
+    - exploratory: needs analysis/judgment language, not broad topic words alone
+    - status/news: need analysis / impact / reasoning signals; freshness alone
+      or ordinary multi-query expansion should stay on the standard path
     """
     if mode == "answer":
         return None
@@ -677,22 +679,35 @@ def _detect_research_profile(query: str, queries: list[str], mode: str,
     combined_text = " ".join([query_text, *queries])
     lower_text = combined_text.lower()
 
-    signals = 0
-    if len(queries) >= 2:
-        signals += 1
-    if _contains_any(lower_text, [
-        "should", "worth", "recommend", "evaluate", "vs", "tradeoff",
-        "trade-off", "why", "reason", "impact", "root cause",
-    ]):
-        signals += 1
-    if _contains_any(combined_text, [
-        "值不值得", "要不要", "推荐", "评估", "对比", "区别", "为什么",
-        "原因", "影响", "根因", "利弊", "阶段", "生态",
-    ]):
-        signals += 1
+    comparison_signal = _contains_any(lower_text, [
+        "vs", "versus", "compare", "comparison", "tradeoff", "trade-off",
+    ]) or _contains_any(combined_text, [
+        "对比", "区别", "优劣", "利弊",
+    ])
 
-    if intent in {"comparison", "exploratory", "status", "news"} and signals >= 1:
+    judgment_signal = _contains_any(lower_text, [
+        "should", "worth", "recommend", "evaluate", "adopt",
+    ]) or _contains_any(combined_text, [
+        "值不值得", "要不要", "推荐", "评估", "是否值得", "关注",
+    ])
+
+    causal_signal = _contains_any(lower_text, [
+        "why", "reason", "impact", "root cause", "what changed",
+    ]) or _contains_any(combined_text, [
+        "为什么", "原因", "影响", "根因", "发生了什么变化", "变化",
+    ])
+
+    query_bundle_signal = len(queries) >= 3
+
+    if intent == "comparison" and (comparison_signal or judgment_signal or query_bundle_signal):
         return "research-light"
+
+    if intent == "exploratory" and (judgment_signal or causal_signal or comparison_signal):
+        return "research-light"
+
+    if intent in {"status", "news"} and (judgment_signal or causal_signal):
+        return "research-light"
+
     return None
 
 

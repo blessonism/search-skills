@@ -128,6 +128,7 @@ python3 /home/node/.openclaw/workspace/skills/search-layer/scripts/search.py \
 - `freshness` 会映射为 Exa `startPublishedDate`，让 status/news 查询和 Tavily/Grok 时间窗口更一致
 - 新增 **research-light** 第二阶段增强：仅当 query 命中复杂 `comparison / exploratory / status / news` 场景时，在标准候选召回之后追加一段 Exa `type=deep` 研究块，并以 `research` 字段附加到输出
 - `research` 是附加 contract，不替换 `results`，保证旧调用方仍可只读 `results`
+- P1.5 边界校准：comparison 需显式对比词或判断词；exploratory 需判断/因果词；status/news 需判断/因果词，不因普通多查询扩展误触发
 - 暂不把 `deep-reasoning` / `outputSchema` 接进默认主路径，避免基础 search-layer 变成重型 research/synthesis 引擎
 
 **Grok 源说明**：

@@ -117,7 +117,7 @@ python3 search-layer/scripts/search.py --extract-refs-urls \
 - **基础 search-layer**：优先快、稳、低心智负担
 - **更重的 Exa reasoning 能力**：作为 research-grade 路径逐步评估
 
-### Exa research-light（P1）
+### Exa research-light（P1.5）
 
 在不破坏现有 `results` contract 的前提下，search-layer 已新增一个**内部 research-light lane**：
 
@@ -126,10 +126,17 @@ python3 search-layer/scripts/search.py --extract-refs-urls \
 - 再追加一段 Exa `type=deep` 的第二阶段研究增强
 - 输出通过可选 `research` block 附加，不替代 `results`
 
+**P1.5 边界校准**（2026-03-09）：
+
+- **comparison**: 显式对比词（vs/区别/对比）或 判断词（should/值不值得/推荐）或 3+ 子查询 → 触发
+- **exploratory**: 判断词 或 因果词（why/为什么/影响）或 对比词 → 触发；单纯宽泛主题词（"生态"）不触发
+- **status/news**: 判断词 或 因果词 → 触发；单纯时效性或普通多查询扩展不触发
+
 这意味着：
 
 - 普通查询默认行为不变
 - 复杂 research 查询可以获得额外的综合结论与 supporting URLs
+- 误触发率显著降低（18 个回归样本全部通过）
 - `deep-reasoning` 仍未进入默认主路径，保留给后续 P2 评估
 
 
