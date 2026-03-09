@@ -117,6 +117,17 @@ python3 /home/node/.openclaw/workspace/skills/search-layer/scripts/search.py \
 | `--domain-boost` | 逗号分隔的域名，匹配的结果权威分 +0.2 |
 | `--num` | 每源每查询的结果数 |
 
+**Exa 源说明（P0 升级后）**：
+- 默认仍走 `/search`，但不再固定死 `type=auto`
+- 当前最小映射：
+  - `resource` → `instant`
+  - `status` / `news` → `fast`
+  - `exploratory` + `mode=deep` → `deep`
+  - 其他 → `auto`
+- 默认附带 `contents.highlights.maxCharacters=1200`，提升 snippet 质量，避免 Exa 结果因空摘要在本地 ranking 中被低估
+- `freshness` 会映射为 Exa `startPublishedDate`，让 status/news 查询和 Tavily/Grok 时间窗口更一致
+- 暂不把 `deep-reasoning` / `outputSchema` 接进主路径，避免基础 search-layer 变成重型 research/synthesis 引擎
+
 **Grok 源说明**：
 - 通过 completions API 调用 Grok 模型（`grok-4.1-fast`），利用其实时知识返回结构化搜索结果
 - 自动检测时间敏感查询并注入当前时间上下文

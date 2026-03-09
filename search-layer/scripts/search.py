@@ -477,27 +477,111 @@ def search_grok(query: str, api_url: str, api_key: str, model: str = "grok-4.1-f
         return []
 
 
+def _exa_type_for_query(mode: str, intent: str | None) -> str:
+    """Map search-layer intent/mode to a conservative Exa search type."""
+    if intent == "resource":
+        return "instant"
+    if intent in {"status", "news"}:
+        return "fast"
+    if intent == "exploratory":
+        return "deep" if mode == "deep" else "auto"
+    return "auto"
+
+
+
+def _exa_start_published_date(freshness: str | None) -> str | None:
+    """Map pd/pw/pm/py freshness to Exa startPublishedDate."""
+    if not freshness:
+        return None
+    days_map = {"pd": 1, "pw": 7, "pm": 30, "py": 365}
+    days = days_map.get(freshness)
+    if not days:
+        return None
+    dt = datetime.now(timezone.utc) - timedelta(days=days)
+    return dt.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+
+def _coerce_text(value) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        parts = []
+        for item in value:
+            if isinstance(item, str):
+                item = item.strip()
+                if item:
+                    parts.append(item)
+            elif isinstance(item, dict):
+                text = str(item.get("text", "")).strip()
+                if text:
+                    parts.append(text)
+        return " … ".join(parts)
+    if isinstance(value, dict):
+        text = str(value.get("text", "")).strip()
+        if text:
+            return text
+    return ""
+
+
+
+def _extract_exa_snippet(res: dict) -> str:
+    """Prefer highlights, then text, then snippet/summary for richer ranking text."""
+    highlights = _coerce_text(res.get("highlights"))
+    if highlights:
+        return highlights
+
+    text = _coerce_text(res.get("text"))
+    if text:
+        return text
+
+    summary = _coerce_text(res.get("summary"))
+    if summary:
+        return summary
+
+    return _coerce_text(res.get("snippet"))
+
+
 @_throttled
-def search_exa(query: str, key: str, num: int = 5) -> list:
+def search_exa(query: str, key: str, num: int = 5,
+               exa_type: str = "auto",
+               freshness: str | None = None,
+               with_highlights: bool = True) -> list:
     try:
+        payload = {
+            "query": query,
+            "numResults": num,
+            "type": exa_type,
+        }
+        start_published_date = _exa_start_published_date(freshness)
+        if start_published_date:
+            payload["startPublishedDate"] = start_published_date
+        if with_highlights:
+            payload["contents"] = {
+                "highlights": {"maxCharacters": 1200}
+            }
+
         r = requests.post(
             "https://api.exa.ai/search",
             headers={"x-api-key": key, "Content-Type": "application/json"},
-            json={"query": query, "numResults": num, "type": "auto"},
+            json=payload,
             timeout=20,
         )
         r.raise_for_status()
+        data = r.json()
+        resolved_search_type = data.get("resolvedSearchType", exa_type)
         results = []
-        for res in r.json().get("results", []):
+        for res in data.get("results", []):
             url = res.get("url")
             if not url:
                 continue
             results.append({
                 "title": res.get("title", ""),
                 "url": url,
-                "snippet": res.get("text", res.get("snippet", "")),
+                "snippet": _extract_exa_snippet(res),
                 "published_date": res.get("publishedDate", ""),
                 "source": "exa",
+                "meta": {"exaType": resolved_search_type},
             })
         return results
     except Exception as e:
@@ -572,7 +656,8 @@ def dedup(results: list) -> list:
 def execute_search(query: str, mode: str, keys: dict, num: int,
                    include_answer: bool = False,
                    freshness: str = None,
-                   sources: set = None) -> tuple:
+                   sources: set = None,
+                   intent: str | None = None) -> tuple:
     """Execute search for a single query. Returns (results_list, answer_text).
     If sources is set, only run those sources (e.g. {'grok', 'exa', 'tavily'})."""
     all_results = []
@@ -587,10 +672,13 @@ def execute_search(query: str, mode: str, keys: dict, num: int,
     grok_key = keys.get("grok_key")
     grok_model = keys.get("grok_model", "grok-4.1-fast")
     has_grok = bool(grok_url and grok_key)
+    exa_type = _exa_type_for_query(mode, intent)
 
     if mode == "fast":
         if "exa" in keys and _want("exa"):
-            all_results = search_exa(query, keys["exa"], num)
+            all_results = search_exa(query, keys["exa"], num,
+                                     exa_type=exa_type,
+                                     freshness=freshness)
         elif has_grok and _want("grok"):
             all_results = search_grok(query, grok_url, grok_key, grok_model, num, freshness)
         else:
@@ -601,7 +689,9 @@ def execute_search(query: str, mode: str, keys: dict, num: int,
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
             futures = {}
             if "exa" in keys and _want("exa"):
-                futures[pool.submit(search_exa, query, keys["exa"], num)] = "exa"
+                futures[pool.submit(
+                    search_exa, query, keys["exa"], num, exa_type, freshness
+                )] = "exa"
             if "tavily" in keys and _want("tavily"):
                 futures[pool.submit(
                     search_tavily, query, keys["tavily"], num,
@@ -752,7 +842,8 @@ def main():
             queries[0], args.mode, keys, args.num,
             include_answer=(args.mode == "answer"),
             freshness=args.freshness,
-            sources=source_filter)
+            sources=source_filter,
+            intent=args.intent)
         all_results = results
     else:
         # Cap outer concurrency: each query may spawn up to 3 inner threads (deep mode),
@@ -762,7 +853,8 @@ def main():
             futures = {
                 pool.submit(execute_search, q, args.mode, keys, args.num,
                             freshness=args.freshness,
-                            sources=source_filter): q
+                            sources=source_filter,
+                            intent=args.intent): q
                 for q in queries
             }
             for fut in concurrent.futures.as_completed(futures):
