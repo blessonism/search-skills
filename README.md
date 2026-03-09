@@ -43,7 +43,7 @@ github-explorer（独立 repo）
 
 两条路径共享同一个目标：**先把信息找对，再决定要不要继续往下挖**。
 
-### 1) Retrieval path（默认主路径）
+### 1. Retrieval path（默认主路径）
 
 默认情况下，search-layer 负责多源召回、去重、排序与合成：
 
@@ -76,7 +76,7 @@ Exa 在默认主路径中的定位是：**提升基础检索质量的 retrieval 
 - **摘要质量增强**：本地优先使用 `highlights -> text -> summary -> snippet` 构造摘要，避免 Exa 因空摘要在 ranking 中被低估
 - **结果可观测性**：在结果 metadata 中保留 `meta.exaType`（Exa 实际 resolved type）
 
-### 2) Research lane
+### 2. Research lane
 
 对于少数明显带有研究性质的查询，search-layer 会在标准召回与排序之后，追加一段 **research-light** 增强流程。
 
@@ -92,7 +92,7 @@ Exa 在默认主路径中的定位是：**提升基础检索质量的 retrieval 
 - **status/news**：判断词 或 因果词 → 触发；单纯时效性或普通多查询扩展不触发
 - **resource / tutorial / factual / answer mode**：默认不触发
 
-### 3) Thread-pulling path（深度追踪路径）
+### 3. Thread-pulling path（深度追踪路径）
 
 当普通搜索结果里出现 GitHub issue / PR、论坛帖子、评论线程等“线索节点”时，search-layer 不会只停留在首层结果，而是可以继续沿引用链深挖。
 
