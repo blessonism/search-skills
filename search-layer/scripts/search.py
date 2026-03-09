@@ -651,6 +651,151 @@ def dedup(results: list) -> list:
 
 
 # ---------------------------------------------------------------------------
+# Research escalation (P1)
+# ---------------------------------------------------------------------------
+def _contains_any(text: str, terms: list[str]) -> bool:
+    return any(term in text for term in terms)
+
+
+
+def _detect_research_profile(query: str, queries: list[str], mode: str,
+                             intent: str | None) -> str | None:
+    """Detect whether this search should escalate into research-light.
+
+    P1 only enables research-light (Exa deep) for a narrow set of complex
+    exploratory/comparison/status/news queries. This is intentionally internal
+    and conservative to preserve v2 defaults.
+    """
+    if mode == "answer":
+        return None
+    if intent in {None, "resource", "tutorial"}:
+        return None
+    if intent == "factual" and len(queries) <= 1:
+        return None
+
+    query_text = query or (queries[0] if queries else "")
+    combined_text = " ".join([query_text, *queries])
+    lower_text = combined_text.lower()
+
+    signals = 0
+    if len(queries) >= 2:
+        signals += 1
+    if _contains_any(lower_text, [
+        "should", "worth", "recommend", "evaluate", "vs", "tradeoff",
+        "trade-off", "why", "reason", "impact", "root cause",
+    ]):
+        signals += 1
+    if _contains_any(combined_text, [
+        "值不值得", "要不要", "推荐", "评估", "对比", "区别", "为什么",
+        "原因", "影响", "根因", "利弊", "阶段", "生态",
+    ]):
+        signals += 1
+
+    if intent in {"comparison", "exploratory", "status", "news"} and signals >= 1:
+        return "research-light"
+    return None
+
+
+
+def _build_research_context(results: list, max_items: int = 8) -> list[dict]:
+    context = []
+    for r in results[:max_items]:
+        context.append({
+            "title": r.get("title", ""),
+            "url": r.get("url", ""),
+            "snippet": r.get("snippet", ""),
+            "published_date": r.get("published_date", ""),
+            "source": r.get("source", ""),
+            "score": r.get("score"),
+        })
+    return context
+
+
+
+def _coerce_research_content(value) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False)
+    return ""
+
+
+
+@_throttled
+def _run_exa_research_light(query: str, queries: list[str], context: list[dict],
+                            key: str, freshness: str | None = None) -> dict | None:
+    """Run Exa deep as a second-stage research lane.
+
+    P1 intentionally keeps this light:
+    - always type=deep
+    - no additionalQueries
+    - no outputSchema
+    - does not replace normal results; only adds a research block
+    """
+    try:
+        payload = {
+            "query": query or (queries[0] if queries else ""),
+            "numResults": max(3, min(5, len(context) or 5)),
+            "type": "deep",
+            "contents": {
+                "highlights": {"maxCharacters": 800}
+            },
+        }
+        start_published_date = _exa_start_published_date(freshness)
+        if start_published_date:
+            payload["startPublishedDate"] = start_published_date
+
+        r = requests.post(
+            "https://api.exa.ai/search",
+            headers={"x-api-key": key, "Content-Type": "application/json"},
+            json=payload,
+            timeout=60,
+        )
+        r.raise_for_status()
+        data = r.json()
+        output = data.get("output") or {}
+        synthesis = _coerce_research_content(output.get("content"))
+        if not synthesis:
+            return None
+
+        supporting_urls = []
+        seen = set()
+        for item in output.get("grounding") or []:
+            for citation in item.get("citations") or []:
+                url = citation.get("url")
+                if not url or url in seen:
+                    continue
+                seen.add(url)
+                supporting_urls.append({
+                    "url": url,
+                    "title": citation.get("title", ""),
+                })
+        if not supporting_urls:
+            for res in data.get("results") or []:
+                url = res.get("url")
+                if not url or url in seen:
+                    continue
+                seen.add(url)
+                supporting_urls.append({
+                    "url": url,
+                    "title": res.get("title", ""),
+                })
+                if len(supporting_urls) >= 5:
+                    break
+
+        return {
+            "enabled": True,
+            "profile": "research-light",
+            "exaType": data.get("resolvedSearchType", "deep"),
+            "synthesis": synthesis,
+            "supportingUrls": supporting_urls,
+        }
+    except Exception as e:
+        print(f"[exa-research-light] error: {e}", file=sys.stderr)
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Single-query search execution
 # ---------------------------------------------------------------------------
 def execute_search(query: str, mode: str, keys: dict, num: int,
@@ -885,6 +1030,25 @@ def main():
         output["answer"] = answer_text
     if args.freshness:
         output["freshness_filter"] = args.freshness
+
+    # Research escalation (P1): run only after standard retrieval + ranking.
+    research_profile = _detect_research_profile(
+        query=queries[0] if queries else "",
+        queries=queries,
+        mode=args.mode,
+        intent=args.intent,
+    )
+    if research_profile == "research-light" and "exa" in keys:
+        research_context = _build_research_context(deduped)
+        research = _run_exa_research_light(
+            query=queries[0] if queries else "",
+            queries=queries,
+            context=research_context,
+            key=keys["exa"],
+            freshness=args.freshness,
+        )
+        if research:
+            output["research"] = research
 
     # --extract-refs: extract references from result URLs or explicit URL list
     if args.extract_refs or args.extract_refs_urls:

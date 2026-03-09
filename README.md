@@ -115,7 +115,22 @@ python3 search-layer/scripts/search.py --extract-refs-urls \
 当前策略是：
 
 - **基础 search-layer**：优先快、稳、低心智负担
-- **更重的 Exa reasoning 能力**：后续作为独立 research-grade 路径评估
+- **更重的 Exa reasoning 能力**：作为 research-grade 路径逐步评估
+
+### Exa research-light（P1）
+
+在不破坏现有 `results` contract 的前提下，search-layer 已新增一个**内部 research-light lane**：
+
+- 仅当 query 命中复杂 `comparison / exploratory / status / news` 场景时触发
+- 先走现有标准候选召回 + 评分排序
+- 再追加一段 Exa `type=deep` 的第二阶段研究增强
+- 输出通过可选 `research` block 附加，不替代 `results`
+
+这意味着：
+
+- 普通查询默认行为不变
+- 复杂 research 查询可以获得额外的综合结论与 supporting URLs
+- `deep-reasoning` 仍未进入默认主路径，保留给后续 P2 评估
 
 
 ### 输出结构（fetch_thread.py）
