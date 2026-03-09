@@ -28,6 +28,14 @@ github-explorer（独立 repo）
 
 ---
 
+## 一眼看懂：这套 Skills 有什么特性
+
+- **四源并行搜索**：Brave + Exa + Tavily + Grok，覆盖普通网页、技术资料、实时信息与权威来源
+- **意图感知检索**：按 `factual / status / comparison / tutorial / exploratory / news / resource` 自动切换策略，而不是一把梭搜索
+- **Research lane**：复杂查询可追加 research-light 增强，但不破坏现有 `results` contract
+- **链式引用追踪**：遇到 GitHub issue / PR、HN、Reddit、V2EX 或网页文章时，可继续沿引用链深挖，而不只停留在首层结果
+- **内容提取能力**：普通网页直接抽取 Markdown；反爬页面可降级到 MinerU
+- **向后兼容**：不需要研究模式时，仍可把它当稳定的基础搜索层使用
 
 ## 安装
 
@@ -174,41 +182,24 @@ Exa 在默认主路径中的定位是：**提升基础检索质量的 retrieval 
 
 ### 3) Thread-pulling path（深度追踪路径）
 
-当普通搜索结果里出现 GitHub issue / PR、论坛帖子、评论线程等“线索节点”时，search-layer 还支持沿引用链继续深挖。
+当普通搜索结果里出现 GitHub issue / PR、论坛帖子、评论线程等“线索节点”时，search-layer 不会只停留在首层结果，而是可以继续沿引用链深挖。
 
-#### 核心工具
+对使用者来说，这条路径的价值不是“多了几个脚本”，而是你可以把它当成一个**从搜索结果进入完整上下文**的能力：
 
-**`fetch_thread.py`** — 结构化深抓多平台帖子/议题：
+- **查 GitHub 问题时**：不只看到 issue 标题，还能继续读正文、评论、关联 PR、交叉引用和 commit 线索
+- **查社区讨论时**：不只拿到一个 HN / Reddit / V2EX 链接，而是能继续拿到帖子正文与关键回复
+- **查网页文章时**：不只保留链接本身，还能提取正文和内部/外部引用，方便继续追踪
+- **做根因分析时**：可以顺着“谁引用了谁、修复落在哪、讨论后来怎么演变”继续往下走，而不是停在第一层搜索结果
 
-| 平台 | 方法 | 获取内容 |
-|------|------|---------|
-| GitHub Issue/PR | REST API | 正文 + 全部评论 + 跨引用 PR/issue + commit 引用 |
-| Hacker News | Algolia API | 帖子 + 递归评论树（无限深度，上限 200 条） |
-| Reddit | `.json` 端点 | 帖子 + 评论树（深度 ≤ 4，上限 200 条） |
-| V2EX | API | 主题 + 全部回复 |
-| 通用网页 | trafilatura → BS4 → regex 三层回退 | 正文 + 链接 |
+当前支持的平台包括：
 
-```bash
-# GitHub issue 或 PR
-python3 search-layer/scripts/fetch_thread.py "https://github.com/owner/repo/issues/123"
-python3 search-layer/scripts/fetch_thread.py "https://github.com/owner/repo/pull/456" --format markdown
+- GitHub Issue / PR
+- Hacker News
+- Reddit
+- V2EX
+- 通用网页
 
-# 仅提取引用（快速模式）
-python3 search-layer/scripts/fetch_thread.py "https://github.com/owner/repo/issues/123" --extract-refs-only
-
-# HN / Reddit / 任意网页
-python3 search-layer/scripts/fetch_thread.py "https://news.ycombinator.com/item?id=43197966"
-python3 search-layer/scripts/fetch_thread.py "https://www.reddit.com/r/Python/comments/abc123/title/"
-python3 search-layer/scripts/fetch_thread.py "https://example.com/blog/post"
-```
-
-**`chain_tracker.py`** — 引用图的广度优先遍历，自动展开引用链（`max_depth` 可配）。
-
-**`relevance_gate.py`** — 在追踪过程中对候选 URL 做相关性评分，过滤低价值节点，避免无限扩散。
-
-#### search.py — Phase 3.5: Thread Pulling
-
-搜索后自动提取结果 URL 的引用图：
+#### 怎么用
 
 ```bash
 # 搜索 + 自动提取引用
@@ -219,18 +210,20 @@ python3 search-layer/scripts/search.py "OpenClaw config validation bug" \
 python3 search-layer/scripts/search.py --extract-refs-urls \
   "https://github.com/owner/repo/issues/123" \
   "https://github.com/owner/repo/issues/456"
+
+# 直接深抓单个 thread / 页面
+python3 search-layer/scripts/fetch_thread.py "https://github.com/owner/repo/issues/123"
+python3 search-layer/scripts/fetch_thread.py "https://news.ycombinator.com/item?id=43197966"
+python3 search-layer/scripts/fetch_thread.py "https://example.com/blog/post"
 ```
 
-输出结果新增 `refs` 字段，并行 fetch（ThreadPoolExecutor，最多 4 workers，上限 20 URLs）。
+#### 典型工作流
 
-#### Agent 链式追踪工作流
-
-```
-1. search.py → 初始搜索结果
-2. --extract-refs → 提取引用图
-3. Agent 筛选高价值节点
-4. fetch_thread.py → 深抓每个节点
-5. 重复直到信息闭合（推荐 max_depth=3）
+```text
+1. 先用 search.py 找到线索
+2. 对结果做 extract-refs，拿到引用图
+3. 选出高价值节点继续深抓
+4. 沿引用链继续追，直到拿到完整上下文或找到根因
 ```
 
 ### 输出结构（fetch_thread.py）
@@ -254,6 +247,15 @@ python3 search-layer/scripts/search.py --extract-refs-urls \
 ---
 
 ## 近期演化（changelog）
+
+### search-layer v3.0 特性
+
+v3.0 新增 **Thread-pulling path**，让 search-layer 从“返回搜索结果”升级为“沿引用链继续深挖上下文”：
+
+- 新增 `fetch_thread.py`，支持 GitHub Issue / PR、Hacker News、Reddit、V2EX、通用网页的结构化深抓
+- `search.py` 支持 `--extract-refs` / `--extract-refs-urls`，可以从搜索结果直接进入引用追踪
+- 适合 GitHub issue 调研、社区讨论梳理、根因分析、workaround 追踪等场景
+- 目标不是多几个内部脚本，而是让 agent 能从“找到链接”继续走到“拿到完整上下文”
 
 ### search-layer v2.2 特性
 
