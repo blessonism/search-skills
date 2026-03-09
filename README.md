@@ -22,15 +22,101 @@
 github-explorer（独立 repo）
 ├── search-layer ──── Exa + Tavily + Grok 并行搜索 + 意图评分 + 链式追踪   ← 本仓库
 ├── content-extract ── 智能 URL → Markdown                                  ← 本仓库
-│   └── mineru-extract ── MinerU API（重活）                                ← 本仓库
+│   └── mineru-extract ── MinerU API（反爬）                                ← 本仓库
 └── OpenClaw 内置工具 ── web_search (Brave), web_fetch, browser
+```
+
+---
+
+
+## 安装
+
+### 方式一：让 OpenClaw 帮你装（推荐 🚀）
+
+直接在对话里告诉你的 OpenClaw agent：
+
+> 帮我安装这个 skill：https://github.com/blessonism/openclaw-search-skills
+
+### 方式二：手动安装
+
+```bash
+# 1. Clone 到任意位置
+mkdir -p ~/.openclaw/workspace/_repos
+git clone https://github.com/blessonism/openclaw-search-skills.git \
+  ~/.openclaw/workspace/_repos/openclaw-search-skills
+
+# 2. 链接到你的 skills 目录
+cd ~/.openclaw/workspace/skills
+
+ln -s ~/.openclaw/workspace/_repos/openclaw-search-skills/search-layer search-layer
+ln -s ~/.openclaw/workspace/_repos/openclaw-search-skills/content-extract content-extract
+ln -s ~/.openclaw/workspace/_repos/openclaw-search-skills/mineru-extract mineru-extract
+```
+
+> 💡 skills 目录因安装方式不同可能不同，常见的是 `~/.openclaw/workspace/skills/` 或 `~/.openclaw/skills/`。
+
+---
+
+## 配置
+
+### 搜索 API Keys（search-layer 需要）
+
+**方式一：Credentials 文件（推荐）**
+
+创建 `~/.openclaw/credentials/search.json`：
+
+```json
+{
+  "exa": "your-exa-key",
+  "tavily": "your-tavily-key",
+  "grok": {
+    "apiUrl": "https://api.x.ai/v1",
+    "apiKey": "your-grok-key",
+    "model": "grok-4.1-fast"
+  }
+}
+```
+
+> 💡 Grok 配置可选。缺失时自动降级为 Exa + Tavily 双源。
+
+**方式二：环境变量（兼容）**
+
+```bash
+export EXA_API_KEY="your-exa-key"        # https://exa.ai
+export TAVILY_API_KEY="your-tavily-key"  # https://tavily.com
+export GROK_API_URL="https://api.x.ai/v1"  # 可选
+export GROK_API_KEY="your-grok-key"      # 可选
+export GROK_MODEL="grok-4.1-fast"        # 可选，默认 grok-4.1-fast
+```
+
+环境变量会覆盖 credentials 文件中的同名配置。
+
+Brave API Key 由 OpenClaw 内置的 `web_search` 工具管理，不需要在这里配置。
+
+### MinerU Token（可选，content-extract 需要）
+
+只有当你需要抓取微信/知乎/小红书等反爬站点时才需要：
+
+```bash
+cp mineru-extract/.env.example mineru-extract/.env
+# 编辑 .env，填入你的 MinerU token（从 https://mineru.net/apiManage 获取）
+```
+
+### Python 依赖
+
+```bash
+# 基础依赖（search-layer v2.x）
+pip install requests
+
+# v3.0 链式追踪新增依赖
+pip install trafilatura beautifulsoup4 lxml
 ```
 
 ---
 
 ## search-layer：两条能力主线
 
-从使用者视角看，search-layer 不是一堆搜索源的堆叠，而是两条互补的能力路径：
+search-layer 不是一堆搜索源的堆叠，而是两条互补的能力路径：
 
 1. **Retrieval path**：面向绝大多数普通搜索请求的主路径
 2. **Thread-pulling path**：面向 GitHub / 论坛 / 帖子深挖的追踪路径
@@ -70,11 +156,9 @@ Exa 在默认主路径中的定位是：**提升基础检索质量的 retrieval 
 - **摘要质量增强**：本地优先使用 `highlights -> text -> summary -> snippet` 构造摘要，避免 Exa 因空摘要在 ranking 中被低估
 - **结果可观测性**：在结果 metadata 中保留 `meta.exaType`（Exa 实际 resolved type）
 
-### 2) Research lane（选择性升级，不替代 `results`）
+### 2) Research lane
 
 对于少数明显带有研究性质的查询，search-layer 会在标准召回与排序之后，追加一段 **research-light** 增强流程。
-
-这个 lane 的特点：
 
 - 先走现有标准候选召回 + 评分排序
 - 再追加一段 Exa `type=deep` 的第二阶段增强
@@ -87,33 +171,6 @@ Exa 在默认主路径中的定位是：**提升基础检索质量的 retrieval 
 - **exploratory**：判断词 或 因果词（`why` / `为什么` / `影响`）或 对比词 → 触发；单纯宽泛主题词（如“生态”）不触发
 - **status/news**：判断词 或 因果词 → 触发；单纯时效性或普通多查询扩展不触发
 - **resource / tutorial / factual / answer mode**：默认不触发
-
-这保证了：
-
-- 普通查询默认行为不变
-- 复杂 research 查询可以拿到额外的 synthesis + supporting URLs
-- news/status 不会因为普通多查询扩展大面积误触发
-- `results` contract 保持稳定，旧调用方无需适配
-
-### 当前明确不做的事
-
-以下能力仍然**不进入默认主路径**：
-
-- `deep-reasoning`
-- `additionalQueries`
-- `outputSchema`
-
-原因很直接：
-
-- latency 更高
-- cost 更高
-- 会把 retrieval layer 推向 synthesis layer
-- 不利于把公共主路径保持为“快、稳、可解释”
-
-换句话说：
-
-- **基础 search-layer**：优先快、稳、低心智负担
-- **更重的 Exa reasoning 能力**：作为后续 research-grade 路径评估，而不是默认打开
 
 ### 3) Thread-pulling path（深度追踪路径）
 
@@ -230,91 +287,6 @@ v2 借鉴了 [Anthropic knowledge-work-plugins](https://github.com/anthropics/kn
 - **Freshness 过滤**：`--freshness pd/pw/pm/py` 实际传递给 Tavily
 - **Domain Boost**：`--domain-boost github.com,stackoverflow.com` 提升特定域名权重
 - **完全向后兼容**：不带新参数时行为与 v1 一致
-
----
-
-## 安装
-
-### 方式一：让 OpenClaw 帮你装（推荐 🚀）
-
-直接在对话里告诉你的 OpenClaw agent：
-
-> 帮我安装这个 skill：https://github.com/blessonism/openclaw-search-skills
-
-### 方式二：手动安装
-
-```bash
-# 1. Clone 到任意位置
-mkdir -p ~/.openclaw/workspace/_repos
-git clone https://github.com/blessonism/openclaw-search-skills.git \
-  ~/.openclaw/workspace/_repos/openclaw-search-skills
-
-# 2. 链接到你的 skills 目录
-cd ~/.openclaw/workspace/skills
-
-ln -s ~/.openclaw/workspace/_repos/openclaw-search-skills/search-layer search-layer
-ln -s ~/.openclaw/workspace/_repos/openclaw-search-skills/content-extract content-extract
-ln -s ~/.openclaw/workspace/_repos/openclaw-search-skills/mineru-extract mineru-extract
-```
-
-> 💡 skills 目录因安装方式不同可能不同，常见的是 `~/.openclaw/workspace/skills/` 或 `~/.openclaw/skills/`。
-
----
-
-## 配置
-
-### 搜索 API Keys（search-layer 需要）
-
-**方式一：Credentials 文件（推荐）**
-
-创建 `~/.openclaw/credentials/search.json`：
-
-```json
-{
-  "exa": "your-exa-key",
-  "tavily": "your-tavily-key",
-  "grok": {
-    "apiUrl": "https://api.x.ai/v1",
-    "apiKey": "your-grok-key",
-    "model": "grok-4.1-fast"
-  }
-}
-```
-
-> 💡 Grok 配置可选。缺失时自动降级为 Exa + Tavily 双源。
-
-**方式二：环境变量（兼容）**
-
-```bash
-export EXA_API_KEY="your-exa-key"        # https://exa.ai
-export TAVILY_API_KEY="your-tavily-key"  # https://tavily.com
-export GROK_API_URL="https://api.x.ai/v1"  # 可选
-export GROK_API_KEY="your-grok-key"      # 可选
-export GROK_MODEL="grok-4.1-fast"        # 可选，默认 grok-4.1-fast
-```
-
-环境变量会覆盖 credentials 文件中的同名配置。
-
-Brave API Key 由 OpenClaw 内置的 `web_search` 工具管理，不需要在这里配置。
-
-### MinerU Token（可选，content-extract 需要）
-
-只有当你需要抓取微信/知乎/小红书等反爬站点时才需要：
-
-```bash
-cp mineru-extract/.env.example mineru-extract/.env
-# 编辑 .env，填入你的 MinerU token（从 https://mineru.net/apiManage 获取）
-```
-
-### Python 依赖
-
-```bash
-# 基础依赖（search-layer v2.x）
-pip install requests
-
-# v3.0 链式追踪新增依赖
-pip install trafilatura beautifulsoup4 lxml
-```
 
 ---
 
