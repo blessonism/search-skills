@@ -89,6 +89,35 @@ python3 search-layer/scripts/search.py --extract-refs-urls \
 5. 重复直到信息闭合（推荐 max_depth=3）
 ```
 
+### Exa P0 接法升级（2026-03）
+
+这一轮对 Exa 做的是**克制型增强**，目标是提升基础检索质量，而不是把 search-layer 变成重型 research engine。
+
+**新增能力：**
+
+- **Exa type 路由**：
+  - `resource` → `instant`
+  - `status` / `news` → `fast`
+  - `exploratory` + `mode=deep` → `deep`
+  - 其他 → `auto`
+- **默认附带 highlights**：请求 Exa 时自动传 `contents.highlights.maxCharacters=1200`
+- **时间窗口对齐**：`--freshness pd/pw/pm/py` 会映射到 Exa `startPublishedDate`
+- **snippet 质量提升**：本地优先使用 `highlights -> text -> summary -> snippet` 构造结果摘要，避免 Exa 结果因为空摘要在 ranking 中被低估
+- **结果可观测性**：结果 metadata 中保留 `meta.exaType`（Exa 实际 resolved type）
+
+**为什么没有默认启用 `deep-reasoning` / `outputSchema`：**
+
+- latency 更高
+- cost 更高
+- 会把基础 search-layer 从 retrieval layer 推向 synthesis layer
+- 不利于把公共主路径保持为“快、稳、可解释”
+
+当前策略是：
+
+- **基础 search-layer**：优先快、稳、低心智负担
+- **更重的 Exa reasoning 能力**：后续作为独立 research-grade 路径评估
+
+
 ### 输出结构（fetch_thread.py）
 
 ```json
