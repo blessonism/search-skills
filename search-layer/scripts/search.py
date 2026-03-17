@@ -561,6 +561,15 @@ def _extract_exa_snippet(res: dict) -> str:
     return _coerce_text(res.get("snippet"))
 
 
+def _resolve_exa_search_url(base_url: str | None = None) -> str:
+    """Resolve a configurable Exa endpoint to the concrete /search URL."""
+    parsed = urlparse((base_url or "https://api.exa.ai").rstrip("/"))
+    path = parsed.path.rstrip("/")
+    if not path.endswith("/search"):
+        path = f"{path}/search" if path else "/search"
+    return urlunparse(parsed._replace(path=path))
+
+
 @_throttled
 def search_exa(query: str, key: str, num: int = 5,
                exa_type: str = "auto",
@@ -588,8 +597,7 @@ def search_exa(query: str, key: str, num: int = 5,
                 "highlights": {"maxCharacters": 1200}
             }
 
-        exa_base = (base_url or "https://api.exa.ai").rstrip("/")
-        exa_url = exa_base if exa_base.endswith("/search") else (exa_base + "/search")
+        exa_url = _resolve_exa_search_url(base_url)
 
         r = requests.post(
             exa_url,
@@ -791,8 +799,7 @@ def _run_exa_research_light(query: str, queries: list[str], context: list[dict],
         if start_published_date:
             payload["startPublishedDate"] = start_published_date
 
-        exa_base = (base_url or "https://api.exa.ai").rstrip("/")
-        exa_url = exa_base if exa_base.endswith("/search") else (exa_base + "/search")
+        exa_url = _resolve_exa_search_url(base_url)
 
         r = requests.post(
             exa_url,
