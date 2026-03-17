@@ -50,6 +50,20 @@ def _throttled(fn):
     return wrapper
 
 
+def _configure_stdio_utf8() -> None:
+    """Best-effort UTF-8 stdio for Windows and other legacy console encodings."""
+    try:
+        if hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding="utf-8")
+        if hasattr(sys.stderr, "reconfigure"):
+            sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
+
+_configure_stdio_utf8()
+
+
 try:
     import requests
 except ImportError:

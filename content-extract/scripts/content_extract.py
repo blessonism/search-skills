@@ -26,6 +26,18 @@ import subprocess
 import sys
 
 
+def _error_output(source_url: str, notes: list[str]) -> dict:
+    return {
+        "ok": False,
+        "source_url": source_url,
+        "engine": "mineru",
+        "markdown": None,
+        "artifacts": {},
+        "sources": [source_url],
+        "notes": notes,
+    }
+
+
 def _find_mineru_wrapper() -> str:
     """Locate mineru_parse_documents.py relative to this script or via env."""
     # 1. Env override
@@ -62,15 +74,7 @@ def main() -> int:
     try:
         wrapper = _find_mineru_wrapper()
     except FileNotFoundError as e:
-        out = {
-            "ok": False,
-            "source_url": args.url,
-            "engine": "mineru",
-            "markdown": None,
-            "artifacts": {},
-            "sources": [args.url],
-            "notes": [str(e)],
-        }
+        out = _error_output(args.url, [str(e)])
         sys.stdout.write(json.dumps(out, ensure_ascii=False))
         return 2
 
@@ -91,49 +95,45 @@ def main() -> int:
         cmd.append("--force")
 
     p = subprocess.run(cmd, capture_output=True, text=True)
-    if p.returncode not in (0, 1):
-        out = {
-            "ok": False,
-            "source_url": args.url,
-            "engine": "mineru",
-            "markdown": None,
-            "artifacts": {},
-            "sources": [args.url],
-            "notes": [
-                "mineru wrapper crashed",
-                (p.stderr or "").strip()[:500],
-            ],
-        }
-        sys.stdout.write(json.dumps(out, ensure_ascii=False))
-        return 2
 
     try:
         j = json.loads(p.stdout)
     except Exception:
-        out = {
-            "ok": False,
-            "source_url": args.url,
-            "engine": "mineru",
-            "markdown": None,
-            "artifacts": {},
-            "sources": [args.url],
-            "notes": ["mineru wrapper returned non-json", (p.stdout or "")[:300]],
-        }
+        j = None
+
+    if j is not None and not isinstance(j, dict):
+        j = None
+
+    if j is None:
+        if p.returncode != 0:
+            out = _error_output(
+                args.url,
+                [
+                    "mineru wrapper crashed",
+                    (p.stderr or "").strip()[:500],
+                ],
+            )
+            sys.stdout.write(json.dumps(out, ensure_ascii=False))
+            return 2
+
+        out = _error_output(
+            args.url,
+            ["mineru wrapper returned non-json", (p.stdout or "")[:300]],
+        )
         sys.stdout.write(json.dumps(out, ensure_ascii=False))
         return 2
 
     if not j.get("items"):
-        out = {
-            "ok": False,
-            "source_url": args.url,
-            "engine": "mineru",
-            "markdown": None,
-            "artifacts": {},
-            "sources": [args.url],
-            "notes": ["no items", json.dumps(j.get("errors") or [], ensure_ascii=False)[:800]],
-        }
+        notes = []
+        if error := j.get("error"):
+            notes.append(str(error))
+        if errors := j.get("errors"):
+            notes.append(json.dumps(errors, ensure_ascii=False)[:800])
+        if not notes:
+            notes.append("no items")
+        out = _error_output(args.url, notes)
         sys.stdout.write(json.dumps(out, ensure_ascii=False))
-        return 1
+        return p.returncode if p.returncode else 1
 
     item = j["items"][0]
     sources = [args.url]
