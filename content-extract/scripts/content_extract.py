@@ -101,8 +101,11 @@ def main() -> int:
     except Exception:
         j = None
 
+    if j is not None and not isinstance(j, dict):
+        j = None
+
     if j is None:
-        if p.returncode not in (0, 1):
+        if p.returncode != 0:
             out = _error_output(
                 args.url,
                 [
