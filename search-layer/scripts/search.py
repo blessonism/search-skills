@@ -42,12 +42,33 @@ _THREAD_SEMAPHORE = threading.Semaphore(8)
 
 
 def _throttled(fn):
-    """Decorator: acquire global semaphore around a search-source call."""
+    """
+    Limit concurrent executions of the decorated function by acquiring the module-level thread semaphore before each call.
+    
+    This decorator ensures the global _THREAD_SEMAPHORE is acquired for the duration of each invocation of the wrapped function, preventing more than the configured number of concurrent search-source calls.
+    
+    Returns:
+    	decorated_fn (callable): A wrapper that calls the original function while holding the semaphore.
+    """
     def wrapper(*args, **kwargs):
         with _THREAD_SEMAPHORE:
             return fn(*args, **kwargs)
     wrapper.__name__ = fn.__name__
     return wrapper
+
+
+def _configure_stdio_utf8() -> None:
+    """Best-effort UTF-8 stdio for Windows and other legacy console encodings."""
+    try:
+        if hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding="utf-8")
+        if hasattr(sys.stderr, "reconfigure"):
+            sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
+
+_configure_stdio_utf8()
 
 
 try:

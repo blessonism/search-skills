@@ -26,8 +26,47 @@ import subprocess
 import sys
 
 
+def _error_output(source_url: str, notes: list[str]) -> dict:
+    """
+    Builds a standardized error response dictionary for MinerU extraction failures.
+    
+    Parameters:
+        source_url (str): The original source URL related to the failure.
+        notes (list[str]): One or more diagnostic or error messages describing the failure.
+    
+    Returns:
+        dict: An error response with the following keys:
+            - "ok": `False`
+            - "source_url": the provided source_url
+            - "engine": "mineru"
+            - "markdown": `None`
+            - "artifacts": empty dict for artifact placeholders
+            - "sources": list containing the provided source_url
+            - "notes": the provided notes list
+    """
+    return {
+        "ok": False,
+        "source_url": source_url,
+        "engine": "mineru",
+        "markdown": None,
+        "artifacts": {},
+        "sources": [source_url],
+        "notes": notes,
+    }
+
+
 def _find_mineru_wrapper() -> str:
-    """Locate mineru_parse_documents.py relative to this script or via env."""
+    """
+    Locate the mineru_parse_documents.py wrapper script.
+    
+    Searches in this order: the MINERU_WRAPPER_PATH environment variable, a monorepo sibling at ../mineru-extract/scripts/mineru_parse_documents.py, and the default OpenClaw workspace under ~/.openclaw/workspace/skills/mineru-extract/scripts/mineru_parse_documents.py.
+    
+    Returns:
+        wrapper_path (str): Filesystem path to the located mineru_parse_documents.py script.
+    
+    Raises:
+        FileNotFoundError: If the wrapper cannot be found in any of the searched locations.
+    """
     # 1. Env override
     if v := os.environ.get("MINERU_WRAPPER_PATH"):
         return v
@@ -50,6 +89,17 @@ def _find_mineru_wrapper() -> str:
 
 
 def main() -> int:
+    """
+    Run the MinerU extraction wrapper with command-line options and emit a compact JSON contract to stdout.
+    
+    Parses CLI options (requires --url; optional --model, --language, --emit-markdown, --max-chars, --force), locates the mineru_parse_documents wrapper, executes it, and interprets its JSON output. On success writes a standardized success JSON containing fields such as ok, source_url, engine, markdown, artifacts, sources, and notes. On failure writes a standardized error JSON (ok: False, engine: "mineru", notes, etc.).
+    
+    Returns:
+        int: Process exit code:
+            0 on successful extraction and output,
+            2 if the wrapper is missing, crashes, or returns non-JSON,
+            the wrapper's return code (or 1 if the wrapper returned 0) when no items are produced.
+    """
     ap = argparse.ArgumentParser()
     ap.add_argument("--url", required=True)
     ap.add_argument("--model", default="MinerU-HTML")
@@ -62,15 +112,7 @@ def main() -> int:
     try:
         wrapper = _find_mineru_wrapper()
     except FileNotFoundError as e:
-        out = {
-            "ok": False,
-            "source_url": args.url,
-            "engine": "mineru",
-            "markdown": None,
-            "artifacts": {},
-            "sources": [args.url],
-            "notes": [str(e)],
-        }
+        out = _error_output(args.url, [str(e)])
         sys.stdout.write(json.dumps(out, ensure_ascii=False))
         return 2
 
@@ -91,49 +133,42 @@ def main() -> int:
         cmd.append("--force")
 
     p = subprocess.run(cmd, capture_output=True, text=True)
-    if p.returncode not in (0, 1):
-        out = {
-            "ok": False,
-            "source_url": args.url,
-            "engine": "mineru",
-            "markdown": None,
-            "artifacts": {},
-            "sources": [args.url],
-            "notes": [
-                "mineru wrapper crashed",
-                (p.stderr or "").strip()[:500],
-            ],
-        }
-        sys.stdout.write(json.dumps(out, ensure_ascii=False))
-        return 2
 
     try:
         j = json.loads(p.stdout)
     except Exception:
-        out = {
-            "ok": False,
-            "source_url": args.url,
-            "engine": "mineru",
-            "markdown": None,
-            "artifacts": {},
-            "sources": [args.url],
-            "notes": ["mineru wrapper returned non-json", (p.stdout or "")[:300]],
-        }
+        j = None
+
+    if j is None:
+        if p.returncode not in (0, 1):
+            out = _error_output(
+                args.url,
+                [
+                    "mineru wrapper crashed",
+                    (p.stderr or "").strip()[:500],
+                ],
+            )
+            sys.stdout.write(json.dumps(out, ensure_ascii=False))
+            return 2
+
+        out = _error_output(
+            args.url,
+            ["mineru wrapper returned non-json", (p.stdout or "")[:300]],
+        )
         sys.stdout.write(json.dumps(out, ensure_ascii=False))
         return 2
 
     if not j.get("items"):
-        out = {
-            "ok": False,
-            "source_url": args.url,
-            "engine": "mineru",
-            "markdown": None,
-            "artifacts": {},
-            "sources": [args.url],
-            "notes": ["no items", json.dumps(j.get("errors") or [], ensure_ascii=False)[:800]],
-        }
+        notes = []
+        if error := j.get("error"):
+            notes.append(str(error))
+        if errors := j.get("errors"):
+            notes.append(json.dumps(errors, ensure_ascii=False)[:800])
+        if not notes:
+            notes.append("no items")
+        out = _error_output(args.url, notes)
         sys.stdout.write(json.dumps(out, ensure_ascii=False))
-        return 1
+        return p.returncode if p.returncode else 1
 
     item = j["items"][0]
     sources = [args.url]
