@@ -133,6 +133,7 @@ python3 /home/node/.openclaw/workspace/skills/search-layer/scripts/search.py \
   - `research` 是附加 contract，不替换 `results`，保证旧调用方仍可只读 `results`
   - 当前边界：comparison 需显式对比词/判断词/3+ 子查询；exploratory 需判断/因果/对比词；status/news 需判断/因果词，不因普通多查询扩展误触发
 - 暂不把 `deep-reasoning` / `outputSchema` 接进默认主路径，避免基础 search-layer 变成重型 research/synthesis 引擎
+- Exa 端点默认是 `https://api.exa.ai/search`；如需自建/代理，可通过 `EXA_API_BASE`/`EXA_API_URL` 或 `~/.openclaw/credentials/search.json` 里的 `exaApiBase` 覆盖（示例：`https://exa.example.com`）
 
 **Grok 源说明**：
 - 通过 completions API 调用 Grok 模型（`grok-4.1-fast`），利用其实时知识返回结构化搜索结果

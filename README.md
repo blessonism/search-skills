@@ -204,6 +204,10 @@ ln -s ~/.openclaw/workspace/_repos/openclaw-search-skills/mineru-extract mineru-
 
 ```bash
 export EXA_API_KEY="your-exa-key"        # https://exa.ai
+# 可选：自定义 Exa 端点（用于自建/代理 Exa）。二选一即可
+export EXA_API_BASE="https://exa.example.com"     # 会自动拼接 /search
+export EXA_API_URL="https://exa.example.com/search"
+
 export TAVILY_API_KEY="your-tavily-key"  # https://tavily.com
 export GROK_API_URL="https://api.x.ai/v1"  # 可选
 export GROK_API_KEY="your-grok-key"      # 可选
@@ -211,6 +215,24 @@ export GROK_MODEL="grok-4.1-fast"        # 可选，默认 grok-4.1-fast
 ```
 
 环境变量会覆盖 credentials 文件中的同名配置。
+
+**可选：自定义 Exa API 端点（用于自建/代理 Exa）**
+
+默认 Exa 端点为 `https://api.exa.ai/search`。
+
+你可以通过以下任一方式覆盖：
+
+- 环境变量：`EXA_API_BASE="https://exa.example.com"`（自动拼接 `/search`）或 `EXA_API_URL="https://exa.example.com/search"`
+- Credentials：在 `~/.openclaw/credentials/search.json` 里增加一项，例如：
+
+```json
+{
+  "exa": "your-exa-key",
+  "exaApiBase": "https://exa.example.com"
+}
+```
+
+（也支持把 `exa` 写成对象：`{"exa": {"apiKey": "...", "apiUrl": "https://exa.example.com"}}`）
 
 Brave API Key 由 OpenClaw 内置的 `web_search` 工具管理，不需要在这里配置。
 

@@ -274,10 +274,26 @@ def get_keys():
         try:
             with open(cred_path) as f:
                 cred = json.load(f)
-            if v := cred.get("exa"):
-                keys["exa"] = v
+
+            # Exa
+            exa = cred.get("exa")
+            if isinstance(exa, dict):
+                if v := exa.get("apiKey"):
+                    keys["exa"] = v
+                if v := (exa.get("apiUrl") or exa.get("baseUrl") or exa.get("apiBase")):
+                    keys["exa_url"] = v
+            elif isinstance(exa, str) and exa:
+                keys["exa"] = exa
+
+            # Optional: explicit Exa base/url fields
+            if v := (cred.get("exaApiUrl") or cred.get("exaApiBase") or cred.get("exaBaseUrl")):
+                keys["exa_url"] = v
+
+            # Tavily
             if v := cred.get("tavily"):
                 keys["tavily"] = v
+
+            # Grok
             if grok := cred.get("grok"):
                 if isinstance(grok, dict):
                     keys["grok_url"] = grok.get("apiUrl", "")
@@ -285,9 +301,12 @@ def get_keys():
                     keys["grok_model"] = grok.get("model", "grok-4.1-fast")
         except (json.JSONDecodeError, FileNotFoundError):
             pass
+
     # 2. Env vars (override / fallback for users without credentials file)
     if v := os.environ.get("EXA_API_KEY"):
         keys["exa"] = v
+    if v := (os.environ.get("EXA_API_BASE") or os.environ.get("EXA_API_URL")):
+        keys["exa_url"] = v
     if v := os.environ.get("TAVILY_API_KEY"):
         keys["tavily"] = v
     if v := os.environ.get("GROK_API_KEY"):
@@ -546,7 +565,15 @@ def _extract_exa_snippet(res: dict) -> str:
 def search_exa(query: str, key: str, num: int = 5,
                exa_type: str = "auto",
                freshness: str | None = None,
-               with_highlights: bool = True) -> list:
+               with_highlights: bool = True,
+               base_url: str | None = None) -> list:
+    """Exa search.
+
+    base_url can be either:
+    - "https://api.exa.ai" (default)
+    - "https://exa.example.com" (we will append /search)
+    - "https://exa.example.com/search" (used as-is)
+    """
     try:
         payload = {
             "query": query,
@@ -561,8 +588,11 @@ def search_exa(query: str, key: str, num: int = 5,
                 "highlights": {"maxCharacters": 1200}
             }
 
+        exa_base = (base_url or "https://api.exa.ai").rstrip("/")
+        exa_url = exa_base if exa_base.endswith("/search") else (exa_base + "/search")
+
         r = requests.post(
-            "https://api.exa.ai/search",
+            exa_url,
             headers={"x-api-key": key, "Content-Type": "application/json"},
             json=payload,
             timeout=20,
@@ -738,7 +768,8 @@ def _coerce_research_content(value) -> str:
 
 @_throttled
 def _run_exa_research_light(query: str, queries: list[str], context: list[dict],
-                            key: str, freshness: str | None = None) -> dict | None:
+                            key: str, freshness: str | None = None,
+                            base_url: str | None = None) -> dict | None:
     """Run Exa deep as a second-stage research lane.
 
     P1 intentionally keeps this light:
@@ -760,8 +791,11 @@ def _run_exa_research_light(query: str, queries: list[str], context: list[dict],
         if start_published_date:
             payload["startPublishedDate"] = start_published_date
 
+        exa_base = (base_url or "https://api.exa.ai").rstrip("/")
+        exa_url = exa_base if exa_base.endswith("/search") else (exa_base + "/search")
+
         r = requests.post(
-            "https://api.exa.ai/search",
+            exa_url,
             headers={"x-api-key": key, "Content-Type": "application/json"},
             json=payload,
             timeout=60,
@@ -836,9 +870,14 @@ def execute_search(query: str, mode: str, keys: dict, num: int,
 
     if mode == "fast":
         if "exa" in keys and _want("exa"):
-            all_results = search_exa(query, keys["exa"], num,
-                                     exa_type=exa_type,
-                                     freshness=freshness)
+            all_results = search_exa(
+                query,
+                keys["exa"],
+                num,
+                exa_type=exa_type,
+                freshness=freshness,
+                base_url=keys.get("exa_url"),
+            )
         elif has_grok and _want("grok"):
             all_results = search_grok(query, grok_url, grok_key, grok_model, num, freshness)
         else:
@@ -850,7 +889,13 @@ def execute_search(query: str, mode: str, keys: dict, num: int,
             futures = {}
             if "exa" in keys and _want("exa"):
                 futures[pool.submit(
-                    search_exa, query, keys["exa"], num, exa_type, freshness
+                    search_exa,
+                    query,
+                    keys["exa"],
+                    num,
+                    exa_type=exa_type,
+                    freshness=freshness,
+                    base_url=keys.get("exa_url"),
                 )] = "exa"
             if "tavily" in keys and _want("tavily"):
                 futures[pool.submit(
@@ -1061,6 +1106,7 @@ def main():
             context=research_context,
             key=keys["exa"],
             freshness=args.freshness,
+            base_url=keys.get("exa_url"),
         )
         if research:
             output["research"] = research
