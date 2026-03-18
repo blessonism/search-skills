@@ -1,29 +1,62 @@
-> 📦 本仓库已收录至 [openclaw-skills](https://github.com/blessonism/openclaw-skills)（聚合仓库，包含更多 Skills）。推荐 Star 聚合仓库以获取全部更新。
+![OpenClaw Search Skills Banner](./images/openclaw-search-skills-banner.png)
 
----
+<div align="center">
 
 # OpenClaw Search Skills
 
-一组 [OpenClaw](https://github.com/openclaw/openclaw) 技能（Skills），提供 **多源搜索** 和 **内容提取** 能力。
+[English](./docs/README_EN.md) | 简体中文
 
-一开始是为 [github-explorer](https://github.com/blessonism/github-explorer-skill) 提供底层支撑，现在独立为高频次使用的 skill。
+**为 OpenClaw 提供多源搜索、线程深抓与高保真内容提取的一组生产级 Skills。**
 
-## 包含什么
+[![OpenClaw](https://img.shields.io/badge/OpenClaw-Skills-0A84FF)](https://github.com/openclaw/openclaw)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![search-layer](https://img.shields.io/badge/search--layer-v3.1-7C3AED)](./search-layer/SKILL.md)
+[![content-extract](https://img.shields.io/badge/content--extract-MinerU%20Fallback-14B8A6)](./content-extract/SKILL.md)
 
-| Skill | 干什么的 |
-|-------|---------| 
+</div>
+
+> 📦 本仓库已收录至 [openclaw-skills](https://github.com/blessonism/openclaw-skills)（聚合仓库，包含更多 Skills）。如果你想追完整能力集合，优先 Star 聚合仓库。
+
+---
+
+## 一、概述
+
+`openclaw-search-skills` 是一组面向 [OpenClaw](https://github.com/openclaw/openclaw) Agent 的可组合搜索能力集合，覆盖从 **找资料**、**抓上下文**、**提正文** 到 **追引用链** 的完整链路。
+
+最初它们是为 [github-explorer](https://github.com/blessonism/github-explorer-skill) 提供底层能力，后来因为复用频率太高，拆成了独立仓库。
+
+```text
+OpenClaw Agent
+├── search-layer      多源搜索编排 / 意图感知评分 / Thread Pulling
+├── content-extract   URL → 干净 Markdown / 反爬站点自动降级
+│   └── mineru-extract 高保真解析（PDF / Office / HTML / OCR）
+└── OpenClaw 内置工具 web_search / web_fetch / browser
+```
+
+### 适合什么场景
+
+- **研究与事实核查**：同一问题并行搜多个源，降低单源偏差
+- **GitHub 问题排查**：不只看 issue body，还能继续拉评论、引用和后继线程
+- **网页资料沉淀**：把文章、PDF、Office 文档稳定转成干净 Markdown
+- **反爬站点提取**：普通抓取不稳时，自动切到 MinerU 兜底
+
+### 仓库包含的 Skills
+
+| Skill | 解决什么问题 |
+|-------|-------------|
 | **[search-layer](./search-layer/)** | 四源并行搜索（Brave + Exa + Tavily + Grok）+ 学术检索模式（OpenAlex + Semantic + Tavily）+ 意图感知评分 + 自动去重 + 链式引用追踪。Brave 由 OpenClaw 内置的 `web_search` 提供。 |
 | **[content-extract](./content-extract/)** | URL → 干净的 Markdown。遇到反爬站点（微信、知乎）自动降级到 MinerU 解析。 |
 | **[mineru-extract](./mineru-extract/)** | [MinerU](https://mineru.net) 官方 API 的封装层。把 PDF、Office 文档、HTML 页面转成 Markdown。 |
 
-## 它们之间的关系
+### 它们之间的关系
 
-```
+```text
 github-explorer（独立 repo）
-├── search-layer ──── Exa + Tavily + Grok 并行搜索 + 意图评分 + 链式追踪   ← 本仓库
-├── content-extract ── 智能 URL → Markdown                                  ← 本仓库
-│   └── mineru-extract ── MinerU API（重活）                                ← 本仓库
-└── OpenClaw 内置工具 ── web_search (Brave), web_fetch, browser
+├── search-layer ───── Exa + Tavily + Grok 并行搜索 + 意图评分 + 链式追踪   ← 本仓库
+├── content-extract ── 智能 URL → Markdown                                   ← 本仓库
+│   └── mineru-extract ─ MinerU API（重活）                                  ← 本仓库
+└── OpenClaw 内置工具 ─ web_search (Brave), web_fetch, browser
 ```
 
 ---
