@@ -16,7 +16,7 @@
 
 </div>
 
-> 📦 本仓库已收录至 [openclaw-skills](https://github.com/blessonism/openclaw-skills)（聚合仓库，包含更多 Skills）。如果你想追完整能力集合，优先 Star 聚合仓库。
+> 📦 本仓库已收录至 [openclaw-skills](https://github.com/blessonism/openclaw-skills)（聚合仓库，包含更多 Skills）。推荐 Star 聚合仓库以获取全部更新。
 
 ---
 
@@ -24,7 +24,6 @@
 
 `openclaw-search-skills` 是一组面向 [OpenClaw](https://github.com/openclaw/openclaw) Agent 的可组合搜索能力集合，覆盖从 **找资料**、**抓上下文**、**提正文** 到 **追引用链** 的完整链路。
 
-最初它们是为 [github-explorer](https://github.com/blessonism/github-explorer-skill) 提供底层能力，后来因为复用频率太高，拆成了独立仓库。
 
 ```text
 OpenClaw Agent
