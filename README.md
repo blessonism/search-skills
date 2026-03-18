@@ -1,12 +1,28 @@
+![OpenClaw Search Skills Banner](./images/openclaw-search-skills-banner.png)
+
+<div align="center">
+
+# OpenClaw Search Skills
+
+[English](./docs/README_EN.md) | 简体中文
+
+**为 OpenClaw 提供多源搜索、线程深抓与高保真内容提取的一组生产级 Skills。**
+
+[![OpenClaw](https://img.shields.io/badge/OpenClaw-Skills-0A84FF)](https://github.com/openclaw/openclaw)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![search-layer](https://img.shields.io/badge/search--layer-v3.1-7C3AED)](./search-layer/SKILL.md)
+[![content-extract](https://img.shields.io/badge/content--extract-MinerU%20Fallback-14B8A6)](./content-extract/SKILL.md)
+
+</div>
+
 > 📦 本仓库已收录至 [openclaw-skills](https://github.com/blessonism/openclaw-skills)（聚合仓库，包含更多 Skills）。推荐 Star 聚合仓库以获取全部更新。
 
 ---
 
-# OpenClaw Search Skills
+## 概述
 
-一组 [OpenClaw](https://github.com/openclaw/openclaw) 技能（Skills），提供 **多源搜索** 和 **内容提取** 能力。
-
-一开始是为 [github-explorer](https://github.com/blessonism/github-explorer-skill) 提供底层支撑，现在独立为高频次使用的 skill。
+`openclaw-search-skills` 是一组面向 [OpenClaw](https://github.com/openclaw/openclaw) Agent 的可组合搜索能力集合，覆盖从 **找资料**、**抓上下文**、**提正文** 到 **追引用链** 的完整链路。
 
 ## 包含什么
 
