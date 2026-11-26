@@ -1,0 +1,7 @@
+# Local operator state is never part of the distributable DSH skill.
+credentials/
+search.json
+.env*
+.venv/
+.cache/
+*.zip

@@ -1,0 +1,26 @@
+{
+  "output": [
+    {
+      "type": "x_search_call",
+      "action": {
+        "sources": [
+          {
+            "title": "xAI update on X",
+            "url": "https://x.com/xai/status/1234567890",
+            "description": "An official xAI post."
+          }
+        ]
+      }
+    },
+    {
+      "type": "message",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "The official account posted an update.",
+          "annotations": []
+        }
+      ]
+    }
+  ]
+}

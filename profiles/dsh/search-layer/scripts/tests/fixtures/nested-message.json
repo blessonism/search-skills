@@ -1,0 +1,44 @@
+{
+  "object": "response",
+  "model": "grok-4.5",
+  "output_text": null,
+  "output": [
+    {
+      "type": "reasoning"
+    },
+    {
+      "type": "web_search_call",
+      "action": {
+        "sources": [
+          {
+            "title": "Official announcement",
+            "url": "https://x.ai/news/grok-4-5?utm_source=test",
+            "description": "Official Grok 4.5 announcement",
+            "published_date": "2026-07-08"
+          },
+          {
+            "title": "Models",
+            "url": "https://docs.x.ai/developers/models",
+            "description": "Official model catalogue"
+          }
+        ]
+      }
+    },
+    {
+      "type": "message",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "Grok 4.5 was announced on July 8, 2026.",
+          "annotations": [
+            {
+              "type": "url_citation",
+              "url": "https://x.ai/news/grok-4-5",
+              "title": "Introducing Grok 4.5"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "cases": [
+    {"id":"factual-01","intent":"factual","query":"What is the Python buffer protocol?","required_domains":["docs.python.org"],"min_citations":1,"max_seconds":45},
+    {"id":"factual-02","intent":"factual","query":"What is WebAssembly component model?","required_domains":["component-model.bytecodealliance.org","github.com"],"min_citations":1,"max_seconds":45},
+    {"id":"factual-03","intent":"factual","query":"What is TLS GREASE?","required_domains":["rfc-editor.org","datatracker.ietf.org"],"min_citations":1,"max_seconds":45},
+    {"id":"factual-04","intent":"factual","query":"What is Android RegisterNatives?","required_domains":["developer.android.com","android.googlesource.com"],"min_citations":1,"max_seconds":45},
+    {"id":"factual-05","intent":"factual","query":"What is the xAI Responses API?","required_domains":["docs.x.ai"],"min_citations":1,"max_seconds":45},
+
+    {"id":"status-01","intent":"status","query":"Latest stable Python release","required_domains":["python.org"],"min_citations":1,"max_seconds":45},
+    {"id":"status-02","intent":"status","query":"Latest Grok API model release","required_domains":["x.ai","docs.x.ai"],"min_citations":1,"max_seconds":45},
+    {"id":"status-03","intent":"status","query":"Current Rust stable release","required_domains":["blog.rust-lang.org"],"min_citations":1,"max_seconds":45},
+    {"id":"status-04","intent":"status","query":"Latest Frida release","required_domains":["github.com","frida.re"],"min_citations":1,"max_seconds":45},
+    {"id":"status-05","intent":"status","query":"Latest Chromium stable release","required_domains":["chromereleases.googleblog.com"],"min_citations":1,"max_seconds":45},
+    {"id":"status-06","intent":"status","query":"Latest OpenAI Codex documentation update","required_domains":["openai.com"],"min_citations":1,"max_seconds":45},
+
+    {"id":"news-01","intent":"news","query":"xAI news this week","required_domains":["x.ai"],"min_citations":1,"max_seconds":45},
+    {"id":"news-02","intent":"news","query":"Python Software Foundation news this month","required_domains":["python.org","pyfound.blogspot.com"],"min_citations":1,"max_seconds":45},
+    {"id":"news-03","intent":"news","query":"Rust project news this month","required_domains":["blog.rust-lang.org"],"min_citations":1,"max_seconds":45},
+    {"id":"news-04","intent":"news","query":"Android developers latest platform announcement","required_domains":["android-developers.googleblog.com","developer.android.com"],"min_citations":1,"max_seconds":45},
+    {"id":"news-05","intent":"news","query":"Cloudflare developer platform latest announcement","required_domains":["blog.cloudflare.com","developers.cloudflare.com"],"min_citations":1,"max_seconds":45},
+
+    {"id":"resource-01","intent":"resource","query":"Official xAI model documentation","required_domains":["docs.x.ai"],"min_citations":1,"max_seconds":45},
+    {"id":"resource-02","intent":"resource","query":"Official Babel parser repository","required_domains":["github.com"],"min_citations":1,"max_seconds":45},
+    {"id":"resource-03","intent":"resource","query":"Official Frida JavaScript API documentation","required_domains":["frida.re"],"min_citations":1,"max_seconds":45},
+    {"id":"resource-04","intent":"resource","query":"Official Android NDK documentation","required_domains":["developer.android.com"],"min_citations":1,"max_seconds":45},
+    {"id":"resource-05","intent":"resource","query":"Official Exa search API documentation","required_domains":["docs.exa.ai","exa.ai"],"min_citations":1,"max_seconds":45},
+
+    {"id":"exploratory-01","intent":"exploratory","query":"Current approaches to JavaScript control flow unflattening","required_domains":["github.com"],"min_citations":2,"max_seconds":45},
+    {"id":"exploratory-02","intent":"exploratory","query":"Browser fingerprint detection research using WebGPU","required_domains":[],"min_citations":2,"max_seconds":45},
+    {"id":"exploratory-03","intent":"exploratory","query":"Recent Android native anti-Frida detection techniques","required_domains":[],"min_citations":2,"max_seconds":45},
+    {"id":"exploratory-04","intent":"exploratory","query":"Responses API citation parsing implementation patterns","required_domains":["github.com","docs.x.ai"],"min_citations":2,"max_seconds":45},
+    {"id":"exploratory-05","intent":"exploratory","query":"Current TLS fingerprinting techniques beyond JA3","required_domains":[],"min_citations":2,"max_seconds":45},
+
+    {"id":"comparison-01","intent":"comparison","query":"xAI Responses API versus Chat Completions for web search","required_domains":["docs.x.ai"],"min_citations":2,"max_seconds":45},
+    {"id":"comparison-02","intent":"comparison","query":"Exa versus Tavily search API capabilities","required_domains":["docs.exa.ai","exa.ai","docs.tavily.com","tavily.com"],"min_citations":2,"max_seconds":45},
+    {"id":"comparison-03","intent":"comparison","query":"Frida Stalker versus QBDI instruction tracing","required_domains":["frida.re","github.com"],"min_citations":2,"max_seconds":45},
+    {"id":"comparison-04","intent":"comparison","query":"Chromium CDP versus Firefox WebDriver BiDi debugging capabilities","required_domains":["chromedevtools.github.io","developer.chrome.com","fxdx.dev","w3.org","developer.mozilla.org"],"min_citations":2,"max_seconds":45}
+  ]
+}
