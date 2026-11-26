@@ -1,0 +1,31 @@
+{
+  "object": "response",
+  "output": [
+    {
+      "type": "web_search_call",
+      "action": {
+        "sources": [
+          {
+            "url": "https://example.com/a",
+            "title": "Source A",
+            "snippet": "Evidence A"
+          },
+          {
+            "url": "https://example.com/b",
+            "title": "Source B",
+            "description": "Evidence B"
+          }
+        ]
+      }
+    },
+    {
+      "type": "message",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "A grounded answer."
+        }
+      ]
+    }
+  ]
+}

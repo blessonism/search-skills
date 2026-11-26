@@ -165,18 +165,20 @@ Thread-pulling 能够让你稳定拿到的不是不只是一个链接，而是�
 
 ## 安装
 
+**使用 DeepSeek Harness（DSH）？** 见 [DSH 安装与配置](./profiles/dsh/README.md)。它使用独立的 `search-layer` 技能，默认并行检索 Exa、Tavily 和带供应商引文的 Grok。以下步骤仍适用于 OpenClaw。
+
 ### 方式一：让 OpenClaw 帮你装（推荐 🚀）
 
 直接在对话里告诉你的 OpenClaw agent：
 
-> 帮我安装这个 skill：https://github.com/blessonism/openclaw-search-skills
+> 帮我安装这个 skill：https://github.com/blessonism/search-skills
 
 ### 方式二：手动安装
 
 ```bash
 # 1. Clone 到任意位置
 mkdir -p ~/.openclaw/workspace/_repos
-git clone https://github.com/blessonism/openclaw-search-skills.git \
+git clone https://github.com/blessonism/search-skills.git \
   ~/.openclaw/workspace/_repos/openclaw-search-skills
 
 # 2. 链接到你的 skills 目录

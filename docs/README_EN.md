@@ -200,18 +200,20 @@ v2 borrowed ideas from [Anthropic knowledge-work-plugins](https://github.com/ant
 
 ## Installation
 
+**Using DeepSeek Harness (DSH)?** Follow the [DSH installation guide](../profiles/dsh/README.md). Its optional `search-layer` profile queries Exa, Tavily and provider-cited Grok in parallel. The OpenClaw layout and instructions below are unchanged.
+
 ### Option 1: let OpenClaw install it for you (recommended 🚀)
 
 Just tell your OpenClaw agent:
 
-> Install this skill for me: https://github.com/blessonism/openclaw-search-skills
+> Install this skill for me: https://github.com/blessonism/search-skills
 
 ### Option 2: manual installation
 
 ```bash
 # 1. Clone the repo anywhere you like
 mkdir -p ~/.openclaw/workspace/_repos
-git clone https://github.com/blessonism/openclaw-search-skills.git \
+git clone https://github.com/blessonism/search-skills.git \
   ~/.openclaw/workspace/_repos/openclaw-search-skills
 
 # 2. Symlink the skills into your skills directory

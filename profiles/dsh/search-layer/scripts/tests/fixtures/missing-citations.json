@@ -1,0 +1,17 @@
+{
+  "object": "response",
+  "output": [
+    {
+      "type": "reasoning"
+    },
+    {
+      "type": "message",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "This text has no provider citation."
+        }
+      ]
+    }
+  ]
+}

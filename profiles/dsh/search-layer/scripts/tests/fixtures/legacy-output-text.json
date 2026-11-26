@@ -1,0 +1,11 @@
+{
+  "object": "response",
+  "output_text": "Legacy response text.",
+  "citations": [
+    {
+      "url": "https://example.com/legacy",
+      "title": "Legacy source"
+    }
+  ],
+  "output": []
+}

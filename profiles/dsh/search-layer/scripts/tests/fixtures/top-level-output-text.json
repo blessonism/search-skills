@@ -1,0 +1,16 @@
+{
+  "object": "response",
+  "output": [
+    {
+      "type": "output_text",
+      "text": "Top-level response text.",
+      "annotations": [
+        {
+          "type": "url_citation",
+          "url": "https://example.com/top-level",
+          "title": "Top-level source"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+data: {"type":"response.created","response":{"id":"resp_test"}}
+
+data: {"type":"response.output_text.delta","delta":"Streamed "}
+
+data: {"type":"response.output_text.delta","delta":"answer."}
+
+data: {"type":"response.output_text.annotation.added","annotation":{"type":"url_citation","url":"https://example.com/stream","title":"Stream source"}}
+
+data: {"type":"response.output_item.done","item":{"type":"web_search_call","action":{"sources":[{"url":"https://example.com/stream","title":"Stream source","description":"Streaming evidence."}]}}}
+
+data: {"type":"response.completed","response":{"output":[{"type":"web_search_call","action":{"sources":[{"url":"https://example.com/stream","title":"Stream source","description":"Streaming evidence."}]}},{"type":"message","content":[{"type":"output_text","text":"Streamed answer.","annotations":[{"type":"url_citation","url":"https://example.com/stream","title":"Stream source"}]}]}]}}
+
+data: [DONE]
+
+: end of fixture
